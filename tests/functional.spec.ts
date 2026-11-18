@@ -1,10 +1,9 @@
 import {randomUUID} from 'node:crypto';
-import {test,expect,request as isolatedRequest, type APIRequestContext} from '@playwright/test';
+import {expect,request as isolatedRequest, type APIRequestContext} from '@playwright/test';
+import {test, setupToken, type Origin} from './isolated-app';
 import {routes} from './routes';
-const base='http://127.0.0.1:4319';
 const credentials={email:'e2e.owner@example.test',password:'test-password-for-e2e-only-2026'};
-const origin={'Origin':base,'Sec-Fetch-Site':'same-origin'};
-async function createProject(request:APIRequestContext, name='پروژه ماندگار'){
+async function createProject(request:APIRequestContext, origin:Origin, name='پروژه ماندگار'){
   const id=randomUUID();
   const current=await request.get('/api/state');
   expect(current.status()).toBe(200);
@@ -14,29 +13,31 @@ async function createProject(request:APIRequestContext, name='پروژه مان�
   expect(saved.status()).toBe(200);
   return id;
 }
-test.beforeAll(async({request})=>{
-  const response=await request.post('/api/auth/setup',{headers:origin,data:{
-    setupToken:'this-is-a-public-test-only-token-not-a-secret',email:credentials.email,password:credentials.password,
-    displayName:'E2E Owner',workspace:'E2E Workspace'
-  }});
-  if(response.status()===400){
-    const existing=await request.post('/api/auth/login',{headers:origin,data:credentials});
-    expect(existing.status()).toBe(200);
-  }else expect(response.status()).toBe(200);
+test.beforeEach(async({appURL,origin})=>{
+  const guest=await isolatedRequest.newContext({baseURL:appURL});
+  try {
+    const response=await guest.post('/api/auth/setup',{headers:origin,data:{
+      setupToken,email:credentials.email,password:credentials.password,
+      displayName:'E2E Owner',workspace:'E2E Workspace'
+    }});
+    expect(response.status()).toBe(200);
+  } finally {
+    await guest.dispose();
+  }
 });
 const authenticated = test.extend<{ signedIn: APIRequestContext }>({
-  signedIn: async ({request}, provide) => {
+  signedIn: async ({request,origin}, provide) => {
     const response=await request.post('/api/auth/login',{headers:origin,data:credentials});
     expect(response.status()).toBe(200);
     await provide(request);
   },
 });
-async function signInBrowser(request:APIRequestContext){
+async function signInBrowser(request:APIRequestContext,origin:Origin){
   const response=await request.post('/api/auth/login',{headers:origin,data:credentials});
   expect(response.status()).toBe(200);
 }
-test('session authentication and workspace persistence across refresh',async({page})=>{
-  await signInBrowser(page.request);
+test('session authentication and workspace persistence across refresh',async({page,origin})=>{
+  await signInBrowser(page.request,origin);
   await page.goto('/dashboard');
   await expect(page.locator('html')).toHaveAttribute('dir','rtl');
   const projectId=randomUUID();
@@ -50,8 +51,8 @@ test('session authentication and workspace persistence across refresh',async({pa
   const after=await page.request.get('/api/state');
   expect((await after.json()).data.projects.some((p:{id:string})=>p.id===projectId)).toBe(true);
 });
-authenticated('strict revision conflict and invalid date are rejected',async({signedIn})=>{
-  const projectId=await createProject(signedIn);
+authenticated('strict revision conflict and invalid date are rejected',async({signedIn,origin})=>{
+  const projectId=await createProject(signedIn,origin);
   const response=await signedIn.get('/api/state');
   const {data,version}=await response.json();
   const stale=await signedIn.put('/api/state',{headers:origin,data:{version:version-1,data}});
@@ -60,18 +61,18 @@ authenticated('strict revision conflict and invalid date are rejected',async({si
   const invalid=await signedIn.put('/api/state',{headers:origin,data:{version,data:{...data,tasks:[...data.tasks,task]}}});
   expect(invalid.status()).toBe(422);
 });
-authenticated('CSRF and unauthorized mutations fail closed',async({signedIn})=>{
+authenticated('CSRF and unauthorized mutations fail closed',async({signedIn,origin,appURL})=>{
   const current=await signedIn.get('/api/state');const payload=await current.json();
   const cross=await signedIn.put('/api/state',{headers:{Origin:'https://evil.example','Sec-Fetch-Site':'cross-site'},data:payload});
   expect(cross.status()).toBe(403);
-  const guest=await isolatedRequest.newContext({baseURL:base});
+  const guest=await isolatedRequest.newContext({baseURL:appURL});
   try{
     expect((await guest.get('/api/state')).status()).toBe(401);
   }finally{await guest.dispose();}
 });
-test('responsive authenticated page routes render without horizontal overflow',async({page})=>{
-  await signInBrowser(page.request);
-  const projectId=await createProject(page.request);
+test('responsive authenticated page routes render without horizontal overflow',async({page,origin})=>{
+  await signInBrowser(page.request,origin);
+  const projectId=await createProject(page.request,origin);
   const taskId=randomUUID(),serverId=randomUUID();
   for(const [kind,record] of [
     ['tasks',{id:taskId,projectId,title:'Responsive test task',status:'todo',priority:'medium',owner:'E2E',due:'2026-11-20',description:'',checklist:[],comments:[],dependencies:[]}],
@@ -99,8 +100,8 @@ test('responsive authenticated page routes render without horizontal overflow',a
 });
 
 
-authenticated('free-text credential patterns and fractional expenses are rejected at HTTP boundary',async({signedIn})=>{
-  const projectId=await createProject(signedIn);
+authenticated('free-text credential patterns and fractional expenses are rejected at HTTP boundary',async({signedIn,origin})=>{
+  const projectId=await createProject(signedIn,origin);
   const current=await signedIn.get('/api/state');const {data,version}=await current.json();
   const doc={id:'secrets-negative',title:'Runbook',projectId,type:'Runbook',body:'password: superSecret123456',revision:1,updated:'2026-11-18'};
   const rejected=await signedIn.put('/api/state',{headers:origin,data:{version,data:{...data,docs:[...data.docs,doc]}}});
@@ -110,7 +111,7 @@ authenticated('free-text credential patterns and fractional expenses are rejecte
   expect(fractional.status()).toBe(422);
 });
 
-authenticated('session revoke-others requires reauthentication and leaves current browser active',async({signedIn})=>{
+authenticated('session revoke-others requires reauthentication and leaves current browser active',async({signedIn,origin})=>{
   const before=await signedIn.get('/api/auth/sessions');expect(before.status()).toBe(200);
   const invalid=await signedIn.post('/api/auth/sessions',{headers:origin,data:{action:'revokeOthers',password:'wrong-password'}});
   expect(invalid.status()).toBe(403);
@@ -119,11 +120,11 @@ authenticated('session revoke-others requires reauthentication and leaves curren
   expect((await signedIn.get('/api/state')).status()).toBe(200);
 });
 
-authenticated('invite-only Viewer has scoped read access but cannot write or invite',async({signedIn})=>{
+authenticated('invite-only Viewer has scoped read access but cannot write or invite',async({signedIn,origin,appURL})=>{
   const invitation=await signedIn.post('/api/team/invitations',{headers:origin,data:{email:'viewer.e2e@example.test',role:'viewer'}});
   expect(invitation.status()).toBe(200);
   const {token}=await invitation.json();
-  const viewer=await isolatedRequest.newContext({baseURL:base});
+  const viewer=await isolatedRequest.newContext({baseURL:appURL});
   try{
     const accepted=await viewer.post('/api/auth/accept-invite',{headers:origin,data:{token,email:'viewer.e2e@example.test',displayName:'Viewer E2E',password:'viewer-secure-password-2026'}});
     expect(accepted.status()).toBe(200);
@@ -135,12 +136,12 @@ authenticated('invite-only Viewer has scoped read access but cannot write or inv
   }finally{await viewer.dispose();}
 });
 
-authenticated('Editor can modify tasks but not infrastructure or workspace preferences',async({signedIn})=>{
-  const projectId=await createProject(signedIn);
+authenticated('Editor can modify tasks but not infrastructure or workspace preferences',async({signedIn,origin,appURL})=>{
+  const projectId=await createProject(signedIn,origin);
   const invitation=await signedIn.post('/api/team/invitations',{headers:origin,data:{email:'editor.e2e@example.test',role:'editor'}});
   expect(invitation.status()).toBe(200);
   const {token}=await invitation.json();
-  const editor=await isolatedRequest.newContext({baseURL:base});
+  const editor=await isolatedRequest.newContext({baseURL:appURL});
   try{
     const accepted=await editor.post('/api/auth/accept-invite',{headers:origin,data:{token,email:'editor.e2e@example.test',displayName:'Editor E2E',password:'editor-secure-password-2026'}});
     expect(accepted.status()).toBe(200);
@@ -156,8 +157,8 @@ authenticated('Editor can modify tasks but not infrastructure or workspace prefe
   }finally{await editor.dispose();}
 });
 
-authenticated('Vault reference metadata is visible only to Owners on state and record reads',async({signedIn})=>{
-  const projectId=await createProject(signedIn);
+authenticated('Vault reference metadata is visible only to Owners on state and record reads',async({signedIn,origin,appURL})=>{
+  const projectId=await createProject(signedIn,origin);
   const {version}=await (await signedIn.get('/api/state')).json();
   const id=randomUUID();
   const path=`/api/records/secrets/${id}`;
@@ -169,7 +170,7 @@ authenticated('Vault reference metadata is visible only to Owners on state and r
     const invitation=await signedIn.post('/api/team/invitations',{headers:origin,data:{email,role}});
     expect(invitation.status()).toBe(200);
     const {token}=await invitation.json();
-    const member=await isolatedRequest.newContext({baseURL:base});
+    const member=await isolatedRequest.newContext({baseURL:appURL});
     try{
       const response=await member.post('/api/auth/accept-invite',{headers:origin,data:{
         token,email,displayName:'E2E member',password:'member-test-password-only-2026',
