@@ -1,0 +1,491 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+npm warn exec The following package was not found and will be installed: node@22.23.5
+v22.23.5
+(node:33) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+npm warn deprecated eslint@9.39.5: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+
+added 370 packages in 14s
+(node:45) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> projectos@1.0.0 typecheck
+> tsc --noEmit
+
+(node:66) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> projectos@1.0.0 lint
+> eslint .
+
+(node:79) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:91) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> projectos@1.0.0 test:core
+> node --test scripts/core.test.cjs
+
+(node:104) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:111) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:111) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:119) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:119) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:127) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:127) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:135) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:135) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:147) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:147) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:155) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:155) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:163) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:163) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:171) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:171) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:263) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:263) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:271) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:271) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:279) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:279) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:287) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:287) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (node:295) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:295) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# Subtest: first account requires one-time server-side setup token and hashed password
+ok 1 - first account requires one-time server-side setup token and hashed password
+  ---
+  duration_ms: 224.823751
+  type: 'test'
+  ...
+# Subtest: persistent project, resource, task and docs survive DB reload with cross-collection integrity
+ok 2 - persistent project, resource, task and docs survive DB reload with cross-collection integrity
+  ---
+  duration_ms: 12.64182
+  type: 'test'
+  ...
+# Subtest: server rejects extra secret values, cross-project relations, invalid dates and dependency cycles
+ok 3 - server rejects extra secret values, cross-project relations, invalid dates and dependency cycles
+  ---
+  duration_ms: 1.939518
+  type: 'test'
+  ...
+# Subtest: workspace reads and writes are isolated by owner workspace membership
+ok 4 - workspace reads and writes are isolated by owner workspace membership
+  ---
+  duration_ms: 4.587701
+  type: 'test'
+  ...
+# Subtest: local reminder worker deduplicates delivery and backup passes integrity check
+ok 5 - local reminder worker deduplicates delivery and backup passes integrity check
+  ---
+  duration_ms: 497.707345
+  type: 'test'
+  ...
+# Subtest: rejects impossible calendar dates and resource parent cycles
+ok 6 - rejects impossible calendar dates and resource parent cycles
+  ---
+  duration_ms: 2.346846
+  type: 'test'
+  ...
+# Subtest: rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled
+ok 7 - rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled
+  ---
+  duration_ms: 197.328875
+  type: 'test'
+  ...
+# Subtest: audit preserves the actor name at time of edit and incremental writes preserve unrelated records
+ok 8 - audit preserves the actor name at time of edit and incremental writes preserve unrelated records
+  ---
+  duration_ms: 2.880803
+  type: 'test'
+  ...
+# Subtest: MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed
+ok 9 - MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed
+  ---
+  duration_ms: 4.87806
+  type: 'test'
+  ...
+# Subtest: single-record writes enforce version, ownership, project foreign keys, and integer finance values
+ok 10 - single-record writes enforce version, ownership, project foreign keys, and integer finance values
+  ---
+  duration_ms: 9.818643
+  type: 'test'
+  ...
+# Subtest: encrypted backup verifies with correct key and refuses incorrect key without overwriting database
+ok 11 - encrypted backup verifies with correct key and refuses incorrect key without overwriting database
+  ---
+  duration_ms: 653.848835
+  type: 'test'
+  ...
+# Subtest: credential guard rejects apparent secrets in free-text documents and comments without disclosing values
+ok 12 - credential guard rejects apparent secrets in free-text documents and comments without disclosing values
+  ---
+  duration_ms: 2.38904
+  type: 'test'
+  ...
+# Subtest: expense amounts reject decimals and non-finite values before persistence
+ok 13 - expense amounts reject decimals and non-finite values before persistence
+  ---
+  duration_ms: 2.329859
+  type: 'test'
+  ...
+# Subtest: MFA recovery codes are random, stored as hashes, single-use and revoke existing sessions
+ok 14 - MFA recovery codes are random, stored as hashes, single-use and revoke existing sessions
+  ---
+  duration_ms: 1.947541
+  type: 'test'
+  ...
+# Subtest: plaintext backup requires test-only explicit opt-in to avoid accidental database export
+ok 15 - plaintext backup requires test-only explicit opt-in to avoid accidental database export
+  ---
+  duration_ms: 87.552247
+  type: 'test'
+  ...
+# Subtest: workspace invitation is one-time, email-bound, short-lived and grants editor only assigned record kinds
+ok 16 - workspace invitation is one-time, email-bound, short-lived and grants editor only assigned record kinds
+  ---
+  duration_ms: 79.080737
+  type: 'test'
+  ...
+# Subtest: revoked invitations and forbidden non-owner invitations fail closed
+ok 17 - revoked invitations and forbidden non-owner invitations fail closed
+  ---
+  duration_ms: 1.736499
+  type: 'test'
+  ...
+# Subtest: previously removed member can rejoin only with fresh invitation and correct prior password
+ok 18 - previously removed member can rejoin only with fresh invitation and correct prior password
+  ---
+  duration_ms: 83.547315
+  type: 'test'
+  ...
+# Subtest: vault references accept only known HTTPS provider hosts and never arbitrary credentials URLs
+ok 19 - vault references accept only known HTTPS provider hosts and never arbitrary credentials URLs
+  ---
+  duration_ms: 2.138639
+  type: 'test'
+  ...
+# Subtest: legacy credential-like values are redacted before any workspace state is returned
+ok 20 - legacy credential-like values are redacted before any workspace state is returned
+  ---
+  duration_ms: 1.424966
+  type: 'test'
+  ...
+# Subtest: legacy secret remediation scans without revealing values and only applies after verified encrypted backup
+ok 21 - legacy secret remediation scans without revealing values and only applies after verified encrypted backup
+  ---
+  duration_ms: 1589.055874
+  type: 'test'
+  ...
+# Subtest: bounded JSON reader refuses oversized streaming bodies before buffering the whole request
+ok 22 - bounded JSON reader refuses oversized streaming bodies before buffering the whole request
+  ---
+  duration_ms: 7.462638
+  type: 'test'
+  ...
+# Subtest: free-text credential detection checks EVERY occurrence, not only an initial placeholder
+ok 23 - free-text credential detection checks EVERY occurrence, not only an initial placeholder
+  ---
+  duration_ms: 0.55147
+  type: 'test'
+  ...
+# Subtest: manual activity validates secrets, workspace ownership, historical actor and hourly quota
+ok 24 - manual activity validates secrets, workspace ownership, historical actor and hourly quota
+  ---
+  duration_ms: 20.968612
+  type: 'test'
+  ...
+# Subtest: existing MFA-protected members cannot bypass second factor via invitation reactivation
+ok 25 - existing MFA-protected members cannot bypass second factor via invitation reactivation
+  ---
+  duration_ms: 232.650812
+  type: 'test'
+  ...
+# Subtest: reminder worker disambiguates same-id sources and reconciles Telegram opt-in after an existing alert
+ok 26 - reminder worker disambiguates same-id sources and reconciles Telegram opt-in after an existing alert
+  ---
+  duration_ms: 528.67683
+  type: 'test'
+  ...
+# Subtest: reminder identity and delivery history survive removal of colliding sources
+ok 27 - reminder identity and delivery history survive removal of colliding sources
+  ---
+  duration_ms: 170.386818
+  type: 'test'
+  ...
+# Subtest: SQLite refuses publicly served paths and symlinked database files
+ok 28 - SQLite refuses publicly served paths and symlinked database files
+  ---
+  duration_ms: 1106.675078
+  type: 'test'
+  ...
+# Subtest: origin protection rejects cross-site mutations and fails closed when production origin is missing
+ok 29 - origin protection rejects cross-site mutations and fails closed when production origin is missing
+  ---
+  duration_ms: 1.036812
+  type: 'test'
+  ...
+# Subtest: user changes cannot forge, delete or rewrite worker-owned auto-reminder provenance
+ok 30 - user changes cannot forge, delete or rewrite worker-owned auto-reminder provenance
+  ---
+  duration_ms: 8.698843
+  type: 'test'
+  ...
+# Subtest: authenticated sessions expire after inactivity as well as absolute lifetime
+ok 31 - authenticated sessions expire after inactivity as well as absolute lifetime
+  ---
+  duration_ms: 1.749564
+  type: 'test'
+  ...
+# Subtest: streaming restore preserves compatibility with historical v1 backups and rejects tampering
+ok 32 - streaming restore preserves compatibility with historical v1 backups and rejects tampering
+  ---
+  duration_ms: 484.05096
+  type: 'test'
+  ...
+# Subtest: unrelated record and snapshot writes preserve masked legacy documents and their history
+ok 33 - unrelated record and snapshot writes preserve masked legacy documents and their history
+  ---
+  duration_ms: 6.797778
+  type: 'test'
+  ...
+# Subtest: contract ranges compare UTC instants across accepted ISO precisions
+ok 34 - contract ranges compare UTC instants across accepted ISO precisions
+  ---
+  duration_ms: 2.49228
+  type: 'test'
+  ...
+# Subtest: task comment timestamps must be valid calendar dates and UTC times
+ok 35 - task comment timestamps must be valid calendar dates and UTC times
+  ---
+  duration_ms: 2.308441
+  type: 'test'
+  ...
+1..35
+# tests 35
+# suites 0
+# pass 35
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6786.137842
+(node:347) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> projectos@1.0.0 build
+> next build
+
+(node:360) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+▲ Next.js 16.4.6 (Turbopack)
+✓ Running next.config.ts took 40ms
+
+  Creating an optimized production build ...
+(node:383) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ Compiled successfully in 4.3s
+  Running TypeScript ...
+  Finished TypeScript in 7.7s ...
+  Collecting page data using 8 workers ...
+(node:426) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:432) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:435) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:443) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:448) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:463) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:455) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:478) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:448) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:432) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:435) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:455) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:426) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:478) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:443) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:463) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+  Generating static pages using 8 workers (0/31) ...
+  Generating static pages using 8 workers (7/31)
+  Generating static pages using 8 workers (15/31)
+  Generating static pages using 8 workers (23/31)
+✓ Generating static pages using 8 workers (31/31) in 656ms
+Turbopack build encountered 2 warnings:
+./src/lib/server/db.ts:16:16
+Warning: Dynamic filesystem access causes tracing of the whole project
+  [90m14 |[0m [36mexport[0m [36mfunction[0m getDb(): [33mDatabaseSync[0m {
+  [90m15 |[0m   [36mif[0m (database) [36mreturn[0m database;
+[33m[1m>[0m [90m16 |[0m   [36mconst[0m path = resolve(process.env.[33mPROJECTOS_DB_PATH[0m || [32m'./local-data/projectos.sqlite'[0m);
+  [90m   |[0m                [33m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m17 |[0m   mkdirSync(dirname(path), { recursive: [36mtrue[0m, mode: [35m0o700[0m });
+  [90m18 |[0m   [90m// A misconfigured DB must never be served as a static asset or written through a symlink.[0m
+  [90m19 |[0m   [36mconst[0m parent=realpathSync(dirname(path));
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: path.resolve(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server/db.ts
+    ./src/app/api/records/[kind]/[id]/route.ts
+
+  #2 [Server Component]:
+    ./src/lib/server/db.ts
+    ./src/app/layout.tsx
+
+  #3 [App Route]:
+    ./src/lib/server/db.ts
+    ./src/lib/server/db.ts
+    ./src/app/api/assistant/route.ts
+
+
+./src/lib/server/db.ts:22:16
+Warning: Dynamic filesystem access causes tracing of the whole project
+  [90m20 |[0m   [36mconst[0m writablePath=resolve(parent,basename(path));
+  [90m21 |[0m   [36mfor[0m([36mconst[0m forbidden [36mof[0m [[32m'public'[0m,[32m'.next'[0m,[32m'.git'[0m,[32m'node_modules'[0m]){
+[33m[1m>[0m [90m22 |[0m     [36mconst[0m root=resolve(process.cwd(),forbidden);
+  [90m   |[0m                [33m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m23 |[0m     [36mconst[0m real=existsSync(root)?realpathSync(root):root;
+  [90m24 |[0m     [36mif[0m(writablePath===real||writablePath.startsWith(real+sep))[36mthrow[0m [36mnew[0m [33mError[0m([32m'Unsafe data...[0m
+  [90m25 |[0m   }
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: path.resolve(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server/db.ts
+    ./src/app/api/records/[kind]/[id]/route.ts
+
+  #2 [Server Component]:
+    ./src/lib/server/db.ts
+    ./src/app/layout.tsx
+
+  #3 [App Route]:
+    ./src/lib/server/db.ts
+    ./src/lib/server/db.ts
+    ./src/app/api/assistant/route.ts
+
+
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /activity
+├ ƒ /alerts
+├ ƒ /api/activity
+├ ƒ /api/assistant
+├ ƒ /api/auth/accept-invite
+├ ƒ /api/auth/login
+├ ƒ /api/auth/logout
+├ ƒ /api/auth/me
+├ ƒ /api/auth/mfa
+├ ƒ /api/auth/sessions
+├ ƒ /api/auth/setup
+├ ƒ /api/docs/history
+├ ƒ /api/integrations/github
+├ ƒ /api/monitoring
+├ ƒ /api/records/[kind]/[id]
+├ ƒ /api/state
+├ ƒ /api/team/invitations
+├ ƒ /api/team/members/[id]
+├ ƒ /assistant
+├ ƒ /calendar
+├ ƒ /dashboard
+├ ƒ /docs
+├ ƒ /finance
+├ ƒ /infrastructure
+├ ƒ /infrastructure/servers/[id]
+├ ƒ /integrations
+├ ƒ /join
+├ ƒ /login
+├ ƒ /monitoring
+├ ƒ /onboarding
+├ ƒ /projects
+├ ƒ /projects/[id]
+├ ƒ /reports
+├ ƒ /settings
+├ ƒ /setup
+├ ƒ /tasks
+├ ƒ /tasks/[id]
+├ ƒ /team
+└ ƒ /vault
+
+
+ƒ  (Dynamic)  server-rendered on demand
+
+(node:570) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> projectos@1.0.0 test:smoke
+> playwright test --config=playwright.smoke.config.ts
+
+(node:583) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:596) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:596) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+[WebServer] (node:604) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:604) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+[WebServer] (node:604) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+
+Running 9 tests using 1 worker
+
+(node:625) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:625) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+  ✓  1 tests/functional.spec.ts:38:1 › session authentication and workspace persistence across refresh (1.1s)
+  ✓  2 tests/functional.spec.ts:53:1 › strict revision conflict and invalid date are rejected (124ms)
+  ✓  3 tests/functional.spec.ts:63:1 › CSRF and unauthorized mutations fail closed (90ms)
+  ✓  4 tests/functional.spec.ts:72:1 › responsive authenticated page routes render without horizontal overflow (13.9s)
+  ✓  5 tests/functional.spec.ts:102:1 › free-text credential patterns and fractional expenses are rejected at HTTP boundary (228ms)
+  ✓  6 tests/functional.spec.ts:113:1 › session revoke-others requires reauthentication and leaves current browser active (233ms)
+  ✓  7 tests/functional.spec.ts:122:1 › invite-only Viewer has scoped read access but cannot write or invite (159ms)
+  ✓  8 tests/functional.spec.ts:138:1 › Editor can modify tasks but not infrastructure or workspace preferences (166ms)
+  ✓  9 tests/functional.spec.ts:159:1 › Vault reference metadata is visible only to Owners on state and record reads (329ms)
+
+  9 passed (18.6s)

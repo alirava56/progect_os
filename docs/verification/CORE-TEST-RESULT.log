@@ -1,0 +1,96 @@
+
+> projectos@1.0.0 test:core
+> node --test scripts/core.test.cjs
+
+TAP version 13
+# (node:3491) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3498) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3509) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3520) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3531) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3542) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3553) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:3564) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: first account requires one-time server-side setup token and hashed password
+ok 1 - first account requires one-time server-side setup token and hashed password
+  ---
+  duration_ms: 137.17774
+  type: 'test'
+  ...
+# Subtest: persistent project, resource, task and docs survive DB reload with cross-collection integrity
+ok 2 - persistent project, resource, task and docs survive DB reload with cross-collection integrity
+  ---
+  duration_ms: 3.346944
+  type: 'test'
+  ...
+# Subtest: server rejects extra secret values, cross-project relations, invalid dates and dependency cycles
+ok 3 - server rejects extra secret values, cross-project relations, invalid dates and dependency cycles
+  ---
+  duration_ms: 0.885455
+  type: 'test'
+  ...
+# Subtest: workspace reads and writes are isolated by owner workspace membership
+ok 4 - workspace reads and writes are isolated by owner workspace membership
+  ---
+  duration_ms: 3.325763
+  type: 'test'
+  ...
+# Subtest: local reminder worker deduplicates delivery and backup passes integrity check
+ok 5 - local reminder worker deduplicates delivery and backup passes integrity check
+  ---
+  duration_ms: 232.74334
+  type: 'test'
+  ...
+# Subtest: rejects impossible calendar dates and resource parent cycles
+ok 6 - rejects impossible calendar dates and resource parent cycles
+  ---
+  duration_ms: 0.872846
+  type: 'test'
+  ...
+# Subtest: rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled
+ok 7 - rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled
+  ---
+  duration_ms: 97.43718
+  type: 'test'
+  ...
+# Subtest: audit preserves the actor name at time of edit and incremental writes preserve unrelated records
+ok 8 - audit preserves the actor name at time of edit and incremental writes preserve unrelated records
+  ---
+  duration_ms: 1.582162
+  type: 'test'
+  ...
+# Subtest: MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed
+ok 9 - MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed
+  ---
+  duration_ms: 7.622326
+  type: 'test'
+  ...
+# Subtest: single-record writes enforce version, ownership, project foreign keys, and integer finance values
+ok 10 - single-record writes enforce version, ownership, project foreign keys, and integer finance values
+  ---
+  duration_ms: 4.094216
+  type: 'test'
+  ...
+# Subtest: encrypted backup verifies with correct key and refuses incorrect key without overwriting database
+ok 11 - encrypted backup verifies with correct key and refuses incorrect key without overwriting database
+  ---
+  duration_ms: 368.073543
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1305.710327

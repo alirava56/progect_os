@@ -1,0 +1,70 @@
+# راهنمای عملیاتی ProjectOS Hardened — محیط خصوصی
+
+## پیش‌نیازها
+- Node.js 22 یا نسخه سازگار با Next.js 16؛ اتصال npm برای نصب وابستگی‌ها
+- محیط اختصاصی و خصوصی؛ از Windows یا Linux تنها برای توسعه/آزمون استفاده کن
+- PostgreSQL هنوز Runtime نیست و این نسخه از SQLite محلی استفاده می‌کند
+- بدون HTTPS، بررسی امنیت و تست E2E، برنامه را روی اینترنت عمومی منتشر نکن
+
+## راه‌اندازی محلی
+1. سورس را استخراج و `npm ci --include=optional` اجرا کن.
+2. `.env.example` را به `.env.local` کپی کن؛ یک توکن Setup تصادفی ۳۲ بایتی
+   با `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` بساز.
+3. در صورت نیاز MFA، یک کلید رمزنگاری **مستقل** در `PROJECTOS_MFA_ENCRYPTION_KEY`
+   با طول ۶۴ کاراکتر Hex تنظیم کن؛ هرگز کلید یا رمز را در مخزن Commit نکن.
+4. فقط محلی: `npm run dev -- --hostname 127.0.0.1` و مسیر `/setup`.
+5. پس از ساخت مالک، توکن Setup را از محیط حذف و فرایند را دوباره اجرا کن.
+6. برای Production (پس از همه Gateها)، `PROJECTOS_PUBLIC_ORIGIN` باید با Origin
+   واقعی مرورگر به‌شکل HTTPS دقیقاً یکی باشد؛ در غیر این صورت APIهای نوشتن Fail Closed می‌شوند.
+
+## تست‌های توسعه
+`npm run typecheck`, `npm run lint`, `npm run test:core`, `npm run build`,
+`npx playwright install chromium`، `npm run test:smoke` و `npm audit --audit-level=high`.
+
+یک آزمون فقط در صورت موفقیت واقعی در همان سیستم باید PASS گزارش شود. Build در محیط
+تحویل به‌علت نبود `@next/swc-linux-x64-gnu` و DNS رجیستری npm تأیید نشده است.
+
+## مدیریت اعضا و نشست‌ها
+- مالک در `/team` با ایمیل و نقش Editor/Viewer دعوت می‌سازد؛ کد را فقط یک بار می‌بیند.
+- عضو در `/join` کد را وارد می‌کند؛ Workspace ID و نقش فقط توسط سرور تعیین می‌شود.
+- لغو عضویت، نشست‌های موجود همان عضو را باطل می‌کند.
+- `/settings` برای TOTP، صدور کدهای بازیابی و ابطال نشست‌هاست. کدهای بازیابی را در
+  Password Manager خارجی ذخیره کن. دسترسی به تنظیمات MFA پس از گم‌کردن کدها باید
+  از مسیر کنترل‌شده اپراتور انجام شود؛ بازیابی بدون رمز هنوز وجود ندارد.
+
+## Vault
+- بخش `/vault` فقط لینک‌های HTTPS رسمی و شناسه/نام آیتم را ثبت می‌کند.
+- کلیک روی لینک، صفحه Vault خارجی را باز می‌کند؛ ProjectOS چیزی از Secret را بازیابی نمی‌کند.
+- برای بررسی داده‌های قدیمی: `npm run security:scan-legacy` (فقط گزارش شناسه‌ها).
+- برای پاک‌سازی محتواهای قابل‌تشخیص با Backup رمزنگاری‌شده: `npm run security:scan-legacy -- --apply`
+  **فقط در کپی کنترل‌شده**، با `PROJECTOS_BACKUP_PASSPHRASE` امن. کپی/Backup قدیمی
+  همچنان ممکن است حاوی داده حساس باشد؛ رمزهای افشاشده را Rotate کن.
+
+## Backup و Restore
+- `PROJECTOS_BACKUP_PASSPHRASE` حداقل ۲۰ کاراکتر از Secret Store سیستم میزبان.
+- `npm run backup:encrypted` سپس `npm run verify:encrypted-backup -- <path.posbak>`.
+- Restore تستی از Backup رمزنگاری‌شده یک کپی موقت ایجاد و SQLite Integrity Check
+  اجرا می‌کند؛ **روی دیتابیس عملیاتی overwrite نمی‌کند**.
+- فایل Backup را به فضای Offsite رمزنگاری‌شده منتقل کن، نگهداری و انقضا مشخص کن،
+  و تمرین بازیابی واقعی Staging و سنجش RTO/RPO را جدا انجام بده.
+- دستور `npm run backup` (خام) اکنون در حالت عادی رد می‌شود؛ فقط تست‌های خودکار
+  با متغیر `PROJECTOS_ALLOW_PLAINTEXT_BACKUP=test-only` می‌توانند از آن استفاده کنند.
+
+## زمان‌بندی و اعلان‌ها
+- `npm run reminders` یک اسکن ایدمپوتنت موعدها را اجرا می‌کند.
+- نصب پیشنهادی Linux: قالب‌ها در `deployment/systemd/`؛ قبل از اجرا کاربر، مسیر
+  دیتابیس و فایل EnvironmentFile را بازبینی کن و روی Staging تست بگیر.
+- `PROJECTOS_MONITOR_HOSTS` فهرست میزبان‌های عمومی HTTPS مجاز است. بدون تنظیم
+  صریح، پایش غیر‌فعال است؛ پاسخ‌های نامعلوم یا قدیمی به عنوان «سالم» نمایش داده نمی‌شوند.
+- `PROJECTOS_TELEGRAM_NOTIFICATIONS=enabled` به‌علاوه Bot Token و Chat ID
+  برای ارسال آزمون لازم است. وضعیت `delivered` یعنی Provider درخواست را پذیرفته، نه
+  اینکه کاربر پیام را خوانده است. ارسال ممکن است به‌دلیل Timeout تکرار شود.
+- ارسال ایمیل و مانیتورینگ VPS/VPN/CPU/RAM هنوز راه‌اندازی نشده‌اند.
+
+## سیاست AI
+- در حالت پیش‌فرض `PROJECTOS_AI_ENABLED=disabled` و داده‌ای به OpenAI ارسال نمی‌شود.
+- فقط مالک با Opt-in صریح محیط سرور می‌تواند از AI بیرونی استفاده کند.
+- `PROJECTOS_AI_SEND_DOCS=enabled` یک Opt-in مستقل برای محتوای مستندات است؛
+  قبل از فعال‌سازی نیازمند ارزیابی حریم خصوصی و رضایت کاربران است.
+- هنگام خطای شبکه ممکن است درخواست رسیده باشد؛ UI وضعیت «نامشخص» نشان می‌دهد.
+- مدل هوشمند هنوز RAG ممیزی‌شده، آزمون Prompt Injection و ارزیابی Citation ندارد.

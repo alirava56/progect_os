@@ -1,0 +1,45 @@
+{
+  "name": "projectos",
+  "version": "1.0.0",
+  "description": "ProjectOS private developer workspace (local persistence preview)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test --config=playwright.smoke.config.ts",
+    "test:smoke": "playwright test --config=playwright.smoke.config.ts",
+    "reminders": "node scripts/run-reminders.mjs",
+    "monitors": "node scripts/run-monitors.mjs",
+    "notifications:deliver": "node scripts/deliver-notifications.mjs",
+    "backup": "node scripts/backup.mjs",
+    "backup:encrypted": "node scripts/encrypted-backup.mjs",
+    "verify:encrypted-backup": "node scripts/verify-encrypted-backup.mjs",
+    "verify:backup": "node scripts/verify-backup.mjs",
+    "test:core": "node --test scripts/core.test.cjs",
+    "test:restore": "node scripts/restore-dry-run.mjs",
+    "test:security": "node --test scripts/core.test.cjs",
+    "worker:optional": "node scripts/worker-optional.mjs",
+    "security:scan-legacy": "node scripts/sanitize-legacy-secrets.cjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/vazirmatn": "^5.3.0",
+    "lucide-react": "^1.73.0",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@tailwindcss/postcss": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.6",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^6.0.3"
+  },
+  "private": true
+}

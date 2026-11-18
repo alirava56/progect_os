@@ -1,0 +1,14 @@
+ID,requirement,priority,implementation,test,evidence,status,blocker
+A1,Clean Linux build,P0,Existing lockfile with optional native packages,npm ci and npm run build,evidence-2026-11-18-p0,PASS,Windows and hosted CI remain unverified
+A2,Static and core checks,P0,Typecheck lint core,npm run typecheck lint and test:core,evidence-2026-11-18-p0,PASS,
+A3,Dependency audit,P0,Existing audit gate,npm audit --audit-level=high,evidence-2026-11-18-p0,FAIL,14 high dependency findings in development tree
+A4,Legacy document masking round trip,P0,db.ts,npm run test:core,evidence-2026-11-18-p0,PASS,
+A5,Contract range and comment dates,P0,validation.ts,npm run test:core,evidence-2026-11-18-p0,PASS,
+B1,PostgreSQL runtime and migration rollback,P0,SQLite and PostgreSQL design draft only,,,FAIL,No PostgreSQL runtime or verified migration
+B2,Vault reference read isolation,P0,db.ts and record service,Playwright HTTP,evidence-2026-11-18-p0,PASS,
+B3,Project field and workspace ACL coverage,P0,Workspace and Vault reference checks only,,,FAIL,Project ACL and full permission tests
+C1,Stable identity after removal of colliding source,P0,run-reminders.mjs,npm run test:core,evidence-2026-11-18-p0,PASS,
+C2,Vault recurring schedule real notifications and offsite restore,P0,Private preview worker and local backup only,,,FAIL,Recurring scheduler plus provider staging and full restore
+D1,Deep monitoring GitHub ledger and permission scoped RAG,P1,Private preview integrations and finance,,,FAIL,Advanced implementation and verified providers
+E1,Chromium production smoke,P0,Isolated SQLite and production launcher,npm run test:smoke,evidence-2026-11-18-p0,PASS,
+E2,Full release acceptance,P0,Local subset only,,,FAIL,Accessibility performance SAST hosted CI rollback and staging recovery

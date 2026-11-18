@@ -1,0 +1,21 @@
+[Unit]
+Description=ProjectOS due reminders / optional notifications / monitoring
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=projectos
+Group=projectos
+WorkingDirectory=/opt/projectos
+EnvironmentFile=/etc/projectos/worker.env
+ExecStart=/usr/bin/node /opt/projectos/scripts/run-reminders.mjs
+ExecStart=/usr/bin/node /opt/projectos/scripts/worker-optional.mjs
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/projectos
+PrivateTmp=true
+RestrictSUIDSGID=true
+UMask=0077
+TimeoutStartSec=180

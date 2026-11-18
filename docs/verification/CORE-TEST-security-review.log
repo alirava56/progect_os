@@ -1,0 +1,224 @@
+
+> projectos@1.0.0 test:core
+> node --test scripts/core.test.cjs
+
+TAP version 13
+# (node:4359) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4366) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4377) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4388) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4399) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4410) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4421) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4432) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4523) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4534) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4545) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:4556) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: first account requires one-time server-side setup token and hashed password
+ok 1 - first account requires one-time server-side setup token and hashed password
+  ---
+  duration_ms: 171.8048
+  type: 'test'
+  ...
+# Subtest: persistent project, resource, task and docs survive DB reload with cross-collection integrity
+ok 2 - persistent project, resource, task and docs survive DB reload with cross-collection integrity
+  ---
+  duration_ms: 10.52571
+  type: 'test'
+  ...
+# Subtest: server rejects extra secret values, cross-project relations, invalid dates and dependency cycles
+ok 3 - server rejects extra secret values, cross-project relations, invalid dates and dependency cycles
+  ---
+  duration_ms: 2.356355
+  type: 'test'
+  ...
+# Subtest: workspace reads and writes are isolated by owner workspace membership
+ok 4 - workspace reads and writes are isolated by owner workspace membership
+  ---
+  duration_ms: 5.905137
+  type: 'test'
+  ...
+# Subtest: local reminder worker deduplicates delivery and backup passes integrity check
+ok 5 - local reminder worker deduplicates delivery and backup passes integrity check
+  ---
+  duration_ms: 356.667964
+  type: 'test'
+  ...
+# Subtest: rejects impossible calendar dates and resource parent cycles
+ok 6 - rejects impossible calendar dates and resource parent cycles
+  ---
+  duration_ms: 2.065107
+  type: 'test'
+  ...
+# Subtest: rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled
+ok 7 - rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled
+  ---
+  duration_ms: 138.742376
+  type: 'test'
+  ...
+# Subtest: audit preserves the actor name at time of edit and incremental writes preserve unrelated records
+ok 8 - audit preserves the actor name at time of edit and incremental writes preserve unrelated records
+  ---
+  duration_ms: 3.967288
+  type: 'test'
+  ...
+# Subtest: MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed
+ok 9 - MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed
+  ---
+  duration_ms: 13.9751
+  type: 'test'
+  ...
+# Subtest: single-record writes enforce version, ownership, project foreign keys, and integer finance values
+ok 10 - single-record writes enforce version, ownership, project foreign keys, and integer finance values
+  ---
+  duration_ms: 9.499485
+  type: 'test'
+  ...
+# Subtest: encrypted backup verifies with correct key and refuses incorrect key without overwriting database
+ok 11 - encrypted backup verifies with correct key and refuses incorrect key without overwriting database
+  ---
+  duration_ms: 575.570543
+  type: 'test'
+  ...
+# Subtest: credential guard rejects apparent secrets in free-text documents and comments without disclosing values
+ok 12 - credential guard rejects apparent secrets in free-text documents and comments without disclosing values
+  ---
+  duration_ms: 9.447108
+  type: 'test'
+  ...
+# Subtest: expense amounts reject decimals and non-finite values before persistence
+ok 13 - expense amounts reject decimals and non-finite values before persistence
+  ---
+  duration_ms: 2.149389
+  type: 'test'
+  ...
+# Subtest: MFA recovery codes are random, stored as hashes, single-use and revoke existing sessions
+ok 14 - MFA recovery codes are random, stored as hashes, single-use and revoke existing sessions
+  ---
+  duration_ms: 4.626406
+  type: 'test'
+  ...
+# Subtest: plaintext backup requires test-only explicit opt-in to avoid accidental database export
+ok 15 - plaintext backup requires test-only explicit opt-in to avoid accidental database export
+  ---
+  duration_ms: 48.01919
+  type: 'test'
+  ...
+# Subtest: workspace invitation is one-time, email-bound, short-lived and grants editor only assigned record kinds
+ok 16 - workspace invitation is one-time, email-bound, short-lived and grants editor only assigned record kinds
+  ---
+  duration_ms: 109.860631
+  type: 'test'
+  ...
+# Subtest: revoked invitations and forbidden non-owner invitations fail closed
+ok 17 - revoked invitations and forbidden non-owner invitations fail closed
+  ---
+  duration_ms: 3.573679
+  type: 'test'
+  ...
+# Subtest: previously removed member can rejoin only with fresh invitation and correct prior password
+ok 18 - previously removed member can rejoin only with fresh invitation and correct prior password
+  ---
+  duration_ms: 97.816261
+  type: 'test'
+  ...
+# Subtest: vault references accept only known HTTPS provider hosts and never arbitrary credentials URLs
+ok 19 - vault references accept only known HTTPS provider hosts and never arbitrary credentials URLs
+  ---
+  duration_ms: 3.643618
+  type: 'test'
+  ...
+# Subtest: legacy credential-like values are redacted before any workspace state is returned
+ok 20 - legacy credential-like values are redacted before any workspace state is returned
+  ---
+  duration_ms: 2.736555
+  type: 'test'
+  ...
+# Subtest: legacy secret remediation scans without revealing values and only applies after verified encrypted backup
+ok 21 - legacy secret remediation scans without revealing values and only applies after verified encrypted backup
+  ---
+  duration_ms: 1146.537889
+  type: 'test'
+  ...
+# Subtest: bounded JSON reader refuses oversized streaming bodies before buffering the whole request
+ok 22 - bounded JSON reader refuses oversized streaming bodies before buffering the whole request
+  ---
+  duration_ms: 7.910792
+  type: 'test'
+  ...
+# Subtest: free-text credential detection checks EVERY occurrence, not only an initial placeholder
+ok 23 - free-text credential detection checks EVERY occurrence, not only an initial placeholder
+  ---
+  duration_ms: 0.547585
+  type: 'test'
+  ...
+# Subtest: manual activity validates secrets, workspace ownership, historical actor and hourly quota
+ok 24 - manual activity validates secrets, workspace ownership, historical actor and hourly quota
+  ---
+  duration_ms: 35.409214
+  type: 'test'
+  ...
+# Subtest: existing MFA-protected members cannot bypass second factor via invitation reactivation
+ok 25 - existing MFA-protected members cannot bypass second factor via invitation reactivation
+  ---
+  duration_ms: 212.584987
+  type: 'test'
+  ...
+# Subtest: reminder worker disambiguates same-id sources and reconciles Telegram opt-in after an existing alert
+ok 26 - reminder worker disambiguates same-id sources and reconciles Telegram opt-in after an existing alert
+  ---
+  duration_ms: 327.761038
+  type: 'test'
+  ...
+# Subtest: SQLite refuses publicly served paths and symlinked database files
+ok 27 - SQLite refuses publicly served paths and symlinked database files
+  ---
+  duration_ms: 878.838396
+  type: 'test'
+  ...
+# Subtest: origin protection rejects cross-site mutations and fails closed when production origin is missing
+ok 28 - origin protection rejects cross-site mutations and fails closed when production origin is missing
+  ---
+  duration_ms: 1.074964
+  type: 'test'
+  ...
+# Subtest: user changes cannot forge, delete or rewrite worker-owned auto-reminder provenance
+ok 29 - user changes cannot forge, delete or rewrite worker-owned auto-reminder provenance
+  ---
+  duration_ms: 7.985137
+  type: 'test'
+  ...
+# Subtest: authenticated sessions expire after inactivity as well as absolute lifetime
+ok 30 - authenticated sessions expire after inactivity as well as absolute lifetime
+  ---
+  duration_ms: 2.902225
+  type: 'test'
+  ...
+# Subtest: streaming restore preserves compatibility with historical v1 backups and rejects tampering
+ok 31 - streaming restore preserves compatibility with historical v1 backups and rejects tampering
+  ---
+  duration_ms: 570.503216
+  type: 'test'
+  ...
+1..31
+# tests 31
+# suites 0
+# pass 31
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5551.270689

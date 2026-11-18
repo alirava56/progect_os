@@ -1,0 +1,42 @@
+name: ProjectOS verification
+permissions:
+  contents: read
+on:
+  push:
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install optional platform dependencies
+        run: npm ci --include=optional
+      - name: Typecheck
+        run: npm run typecheck
+      - name: ESLint
+        run: npm run lint
+      - name: Core persistence and security tests
+        run: npm run test:core
+      - name: Production build
+        run: npm run build
+      - name: Dependency advisory gate (fail on high/critical)
+        run: npm audit --audit-level=high
+  e2e-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --include=optional
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Authenticated E2E smoke and authorization checks
+        run: npm run test:smoke
