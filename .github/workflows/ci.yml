@@ -6,29 +6,12 @@ on:
   pull_request:
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - name: Install optional platform dependencies
-        run: npm ci --include=optional
-      - name: Typecheck
-        run: npm run typecheck
-      - name: ESLint
-        run: npm run lint
-      - name: Core persistence and security tests
-        run: npm run test:core
-      - name: Production build
-        run: npm run build
-      - name: Dependency advisory gate (fail on high/critical)
-        run: npm audit --audit-level=high
-  e2e-acceptance:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,7 +19,56 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --include=optional
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:core
+      - run: npm audit --audit-level=high
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
-      - name: Authenticated E2E smoke and authorization checks
-        run: npm run test:smoke
+      - if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - if: runner.os == 'Windows'
+        run: npx playwright install chromium
+      - run: npm run test:smoke
+
+  postgres-migration-and-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: projectos_test
+          POSTGRES_PASSWORD: projectos-ci-disposable-fixture
+        options: >-
+          --health-cmd "pg_isready -U projectos_test -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      PROJECTOS_TEST_POSTGRES_URL: postgresql://projectos_test:projectos-ci-disposable-fixture@127.0.0.1:5432/postgres
+      PROJECTOS_PG_BIN: /usr/lib/postgresql/16/bin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npm ci --include=optional
+      - run: npm run test:postgres
+      - run: npm run build
+      - run: npm run test:postgres-http
+
+  codeql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4

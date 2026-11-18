@@ -11,6 +11,7 @@ require.extensions['.ts']=(mod,file)=>{
   mod._compile(compiled,file);
 };
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'projectos-verify-'));
+process.env.PROJECTOS_DATABASE_URL='';
 process.env.PROJECTOS_DB_PATH=path.join(temp,'test.sqlite');
 process.env.PROJECTOS_SETUP_TOKEN='t'.repeat(40);
 process.env.PROJECTOS_MFA_ENCRYPTION_KEY='a'.repeat(64);
@@ -24,23 +25,23 @@ let owner;
 const project=(id)=>({id,name:id,subtitle:'',coverTitle:id,description:'',status:'building',type:'وب‌سایت',progress:0,next:'',art:'navigation/projects'});
 const task=(id,pid)=>({id,title:id,projectId:pid,status:'todo',priority:'medium',owner:'test',due:'2026-11-20',description:'',checklist:[],comments:[],dependencies:[]});
 
-test('first account requires one-time server-side setup token and hashed password',()=>{
-  assert.equal(userCount(),0);
-  assert.throws(()=>setupOwner({setupToken:'bad',email:'one@example.com',password:'a'.repeat(16),displayName:'Owner',workspace:'Private'}));
-  const uid=setupOwner({setupToken:'t'.repeat(40),email:'one@example.com',password:'verystrong-password-2026',displayName:'Owner',workspace:'Private'});
-  assert.equal(userCount(),1);
-  assert.throws(()=>setupOwner({setupToken:'t'.repeat(40),email:'two@example.com',password:'verystrong-password-2026',displayName:'Other',workspace:'Other'}));
-  assert.equal(authenticate('one@example.com','verystrong-password-2026'),uid);
-  assert.equal(authenticate('one@example.com','incorrect-password'),null);
+test('first account requires one-time server-side setup token and hashed password',async ()=>{
+  assert.equal((await userCount()),0);
+  await assert.rejects(async ()=>(await setupOwner({setupToken:'bad',email:'one@example.com',password:'a'.repeat(16),displayName:'Owner',workspace:'Private'})));
+  const uid=(await setupOwner({setupToken:'t'.repeat(40),email:'one@example.com',password:'verystrong-password-2026',displayName:'Owner',workspace:'Private'}));
+  assert.equal((await userCount()),1);
+  await assert.rejects(async ()=>(await setupOwner({setupToken:'t'.repeat(40),email:'two@example.com',password:'verystrong-password-2026',displayName:'Other',workspace:'Other'})));
+  assert.equal((await authenticate('one@example.com','verystrong-password-2026')),uid);
+  assert.equal((await authenticate('one@example.com','incorrect-password')),null);
   const row=getDb().prepare('SELECT password_hash,salt FROM users WHERE id=?').get(uid);
   assert.ok(row.password_hash.length>=64);
   assert.ok(!JSON.stringify(row).includes('verystrong-password'));
-  assert.equal(newSession(uid).length>20,true);
+  assert.equal((await newSession(uid)).length>20,true);
   owner=getDb().prepare("SELECT u.id,u.email,u.display_name AS displayName,m.workspace_id AS workspaceId,m.role FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=?").get(uid);
 });
 
-test('persistent project, resource, task and docs survive DB reload with cross-collection integrity',()=>{
-  const initial=loadState(owner);
+test('persistent project, resource, task and docs survive DB reload with cross-collection integrity',async ()=>{
+  const initial=(await loadState(owner));
   assert.equal(initial.version,0);
   const value=structuredClone(initial.data);
   value.projects=[project('a'),project('b')];
@@ -48,18 +49,18 @@ test('persistent project, resource, task and docs survive DB reload with cross-c
   value.resources=[{id:'srv',name:'Server',projectId:'a',linkedProjectIds:['b'],type:'server',address:'203.0.113.23',environment:'Production',status:'registered',provider:'Provider',port:22,tags:[]}];
   value.docs=[{id:'doc',title:'Runbook',projectId:'a',type:'Runbook',body:'No actual credentials.',revision:1,updated:'2026-11-18'}];
   const clean=parseState(value);
-  const version=saveState(owner,0,clean);
+  const version=(await saveState(owner,0,clean));
   assert.equal(version,1);
-  const loaded=loadState(owner);
+  const loaded=(await loadState(owner));
   assert.equal(loaded.data.projects.length,2);
   assert.equal(loaded.data.resources[0].linkedProjectIds[0],'b');
   assert.equal(loaded.data.docs[0].body,'No actual credentials.');
   assert.equal(loaded.data.events.length,5);
-  assert.throws(()=>saveState(owner,0,clean),VersionConflictError);
+  await assert.rejects(async ()=>(await saveState(owner,0,clean)),VersionConflictError);
 });
 
-test('server rejects extra secret values, cross-project relations, invalid dates and dependency cycles',()=>{
-  const state=loadState(owner).data;
+test('server rejects extra secret values, cross-project relations, invalid dates and dependency cycles',async ()=>{
+  const state=(await loadState(owner)).data;
   const copy=structuredClone(state);
   copy.secrets=[{id:'s',name:'SSH',projectId:'a',type:'SSH Key',vaultProvider:'Infisical',privateKey:'DO_NOT_STORE'}];
   assert.throws(()=>parseState(copy),ValidationError);
@@ -75,39 +76,39 @@ test('server rejects extra secret values, cross-project relations, invalid dates
   assert.throws(()=>parseState(copy),ValidationError);
 });
 
-test('workspace reads and writes are isolated by owner workspace membership',()=>{
+test('workspace reads and writes are isolated by owner workspace membership',async ()=>{
   const db=getDb();
   const uid=crypto.randomUUID(),ws=crypto.randomUUID();
   db.prepare('INSERT INTO users(id,email,display_name,password_hash,salt,created_at) VALUES(?,?,?,?,?,?)').run(uid,'two@example.com','Second','x'.repeat(128),'s',new Date().toISOString());
   db.prepare('INSERT INTO workspaces(id,name,created_at) VALUES(?,?,?)').run(ws,'Second',new Date().toISOString());
   db.prepare('INSERT INTO memberships(user_id,workspace_id,role) VALUES(?,?,?)').run(uid,ws,'owner');
   const secondary={id:uid,email:'two@example.com',displayName:'Second',workspaceId:ws,role:'owner'};
-  assert.equal(loadState(secondary).data.projects.length,0);
-  const updated=structuredClone(loadState(secondary).data);updated.projects=[project('z')];
-  saveState(secondary,0,parseState(updated));
-  assert.equal(loadState(owner).data.projects.length,2);
-  assert.equal(loadState(secondary).data.projects[0].name,'z');
-  assert.throws(()=>saveState({...owner,role:'viewer'},1,parseState(loadState(owner).data)));
+  assert.equal((await loadState(secondary)).data.projects.length,0);
+  const updated=structuredClone((await loadState(secondary)).data);updated.projects=[project('z')];
+  (await saveState(secondary,0,parseState(updated)));
+  assert.equal((await loadState(owner)).data.projects.length,2);
+  assert.equal((await loadState(secondary)).data.projects[0].name,'z');
+  await assert.rejects(async ()=>(await saveState({...owner,role:'viewer'},1,parseState((await loadState(owner)).data))));
 });
 
-test('local reminder worker deduplicates delivery and backup passes integrity check',()=>{
-  const current=loadState(owner);
+test('local reminder worker deduplicates delivery and backup passes integrity check',async ()=>{
+  const current=(await loadState(owner));
   const value=structuredClone(current.data);
   const due=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   value.reminders=[{id:'renewal-1',title:'Renew VPS',projectId:'a',kind:'تمدید',due}];
-  saveState(owner,current.version,parseState(value));
+  (await saveState(owner,current.version,parseState(value)));
   const exec=(script,args=[])=>execFileSync(process.execPath,[path.join(__dirname,script),...args],{env:{...process.env},encoding:'utf8'});
   const first=JSON.parse(exec('run-reminders.mjs'));assert.equal(first.generated,1);
   const second=JSON.parse(exec('run-reminders.mjs'));assert.equal(second.generated,0);
-  assert.equal(loadState(owner).data.incidents.length,1);
+  assert.equal((await loadState(owner)).data.incidents.length,1);
   const backupPath=path.join(temp,'backup.sqlite');
   exec('backup.mjs',[backupPath]);
   const report=exec('verify-backup.mjs',[backupPath]);assert.match(report,/"integrity": "ok"/);
   assert.match(exec('restore-dry-run.mjs',[backupPath]),/"ok":true/);
 });
 
-test('rejects impossible calendar dates and resource parent cycles',()=>{
-  const original=loadState(owner).data;
+test('rejects impossible calendar dates and resource parent cycles',async ()=>{
+  const original=(await loadState(owner)).data;
   const invalid=structuredClone(original);
   invalid.tasks[0].due='2026-02-30';
   assert.throws(()=>parseState(invalid),ValidationError);
@@ -119,71 +120,71 @@ test('rejects impossible calendar dates and resource parent cycles',()=>{
   assert.throws(()=>parseState(invalid),ValidationError);
 });
 
-test('rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled',()=>{
+test('rescheduled reminders retire old alerts and keep unrelated reminders when renewals disabled',async ()=>{
   const exec=(script,args=[])=>JSON.parse(execFileSync(process.execPath,[path.join(__dirname,script),...args],{env:{...process.env},encoding:'utf8'}));
-  const current=loadState(owner);
+  const current=(await loadState(owner));
   const value=structuredClone(current.data);
   // Replace due date for the previously triggered reminder.
   value.reminders=[{id:'renewal-1',title:'Renew VPS',projectId:'a',kind:'تمدید',due:'2099-10-20'}];
-  saveState(owner,current.version,parseState(value));
+  (await saveState(owner,current.version,parseState(value)));
   const result=exec('run-reminders.mjs');
   assert.equal(result.retired,1);
-  assert.equal(loadState(owner).data.incidents.filter(i=>i.id.startsWith('auto-')).length,0);
+  assert.equal((await loadState(owner)).data.incidents.filter(i=>i.id.startsWith('auto-')).length,0);
   const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const latest=loadState(owner);
+  const latest=(await loadState(owner));
   const followup=structuredClone(latest.data);
   followup.preferences.renewal=false;
   followup.reminders=[{id:'general-1',title:'Check project',projectId:'a',kind:'یادآوری',due:today}];
-  saveState(owner,latest.version,parseState(followup));
+  (await saveState(owner,latest.version,parseState(followup)));
   assert.equal(exec('run-reminders.mjs').generated,1);
-  assert.equal(loadState(owner).data.incidents.filter(i=>i.id.startsWith('auto-')).length,1);
+  assert.equal((await loadState(owner)).data.incidents.filter(i=>i.id.startsWith('auto-')).length,1);
 });
 
-test('audit preserves the actor name at time of edit and incremental writes preserve unrelated records',()=>{
-  const before=loadState(owner);
+test('audit preserves the actor name at time of edit and incremental writes preserve unrelated records',async ()=>{
+  const before=(await loadState(owner));
   const next=structuredClone(before.data);
   next.preferences.displayName='Renamed Owner';
   next.tasks[0].description='Edited via safe incremental update';
-  saveState(owner,before.version,parseState(next));
-  const result=loadState(owner);
+  (await saveState(owner,before.version,parseState(next)));
+  const result=(await loadState(owner));
   assert.equal(result.data.events.find(e=>e.title==='t1').actor,'Owner');
   assert.equal(result.data.tasks[0].description,'Edited via safe incremental update');
 });
 
-test('MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed',()=>{
-  const started=beginMfa(owner.id,owner.email);
+test('MFA seed is encrypted, enrollment requires valid code, and accepted TOTP cannot be replayed',async ()=>{
+  const started=(await beginMfa(owner.id,owner.email));
   assert.equal(started.secret.length,32);
   const row=getDb().prepare('SELECT mfa_pending FROM users WHERE id=?').get(owner.id);
   assert.ok(!row.mfa_pending.includes(started.secret));
-  assert.equal(confirmMfa(owner.id,'000000'),false);
-  assert.equal(confirmMfa(owner.id,totp(started.secret)),true);
-  assert.equal(mfaEnabled(owner.id),true);
+  assert.equal((await confirmMfa(owner.id,'000000')),false);
+  assert.equal((await confirmMfa(owner.id,totp(started.secret))),true);
+  assert.equal((await mfaEnabled(owner.id)),true);
   // Confirm consumed current time step; replaying same code must be rejected.
-  assert.equal(verifyMfa(owner.id,totp(started.secret)),false);
-  assert.equal(verifyMfa(owner.id,'nope'),false);
+  assert.equal((await verifyMfa(owner.id,totp(started.secret))),false);
+  assert.equal((await verifyMfa(owner.id,'nope')),false);
 });
 
-test('single-record writes enforce version, ownership, project foreign keys, and integer finance values',()=>{
-  const state=loadState(owner);
+test('single-record writes enforce version, ownership, project foreign keys, and integer finance values',async ()=>{
+  const state=(await loadState(owner));
   const charge={id:'hosting-charge',projectId:'a',title:'Monthly hosting',provider:'Provider',amount:245000,currency:'TOMAN',period:'monthly',nextDue:'2026-12-01',status:'active'};
-  assert.throws(()=>mutateRecord({...owner,role:'viewer'},state.version,'charges',charge.id,'create',charge));
-  assert.throws(()=>mutateRecord(owner,state.version,'charges',charge.id,'create',{...charge,amount:123.5}),ValidationError);
-  const version=mutateRecord(owner,state.version,'charges',charge.id,'create',charge);
-  assert.equal(loadState(owner).data.charges[0].amount,245000);
-  assert.throws(()=>mutateRecord(owner,state.version,'charges','other','create',{...charge,id:'other'}),VersionConflictError);
+  await assert.rejects(async ()=>(await mutateRecord({...owner,role:'viewer'},state.version,'charges',charge.id,'create',charge)));
+  await assert.rejects(async ()=>(await mutateRecord(owner,state.version,'charges',charge.id,'create',{...charge,amount:123.5})),ValidationError);
+  const version=(await mutateRecord(owner,state.version,'charges',charge.id,'create',charge));
+  assert.equal((await loadState(owner)).data.charges[0].amount,245000);
+  await assert.rejects(async ()=>(await mutateRecord(owner,state.version,'charges','other','create',{...charge,id:'other'})),VersionConflictError);
   const revenue={id:'rev-1',projectId:'a',title:'Contract payment',amount:1000000,currency:'TOMAN',date:'2026-11-18',status:'received'};
-  mutateRecord(owner,version,'revenues',revenue.id,'create',revenue);
-  assert.equal(loadState(owner).data.revenues.length,1);
+  (await mutateRecord(owner,version,'revenues',revenue.id,'create',revenue));
+  assert.equal((await loadState(owner)).data.revenues.length,1);
 });
 
-test('encrypted backup verifies with correct key and refuses incorrect key without overwriting database',()=>{
+test('encrypted backup verifies with correct key and refuses incorrect key without overwriting database',async ()=>{
   const pathTo=path.join(temp,'encrypted.posbak');
   const env={...process.env,PROJECTOS_BACKUP_PASSPHRASE:'test-passphrase-long-enough-for-validation-2026'};
   const run=(script,environment)=>execFileSync(process.execPath,[path.join(__dirname,script),pathTo],{env:environment,encoding:'utf8',stdio:['ignore','pipe','pipe']});
   assert.match(run('encrypted-backup.mjs',env),/"encrypted":true/);
   assert.match(run('verify-encrypted-backup.mjs',env),/"ok":true/);
   assert.throws(()=>run('verify-encrypted-backup.mjs',{...env,PROJECTOS_BACKUP_PASSPHRASE:'incorrect-test-passphrase-with-enough-length'}));
-  assert.equal(loadState(owner).data.projects.length,2);
+  assert.equal((await loadState(owner)).data.projects.length,2);
 });
 
 after(()=>{
@@ -191,12 +192,12 @@ after(()=>{
   try{fs.rmSync(temp,{recursive:true,force:true});}catch{}
 });
 
-test('credential guard rejects apparent secrets in free-text documents and comments without disclosing values',()=>{
+test('credential guard rejects apparent secrets in free-text documents and comments without disclosing values',async ()=>{
   const {suspiciousCredential,redactCredentials}=require('../src/lib/server/credential-guard.ts');
   assert.equal(suspiciousCredential('password: high-entropy-test-password'),true);
   assert.equal(suspiciousCredential('API_KEY=abcd1234567890'),true);
   assert.equal(suspiciousCredential('No actual credentials.'),false);
-  const current=loadState(owner).data;
+  const current=(await loadState(owner)).data;
   const value=structuredClone(current);
   value.docs[0].body='server password: highlySecretValue123!';
   assert.throws(()=>parseState(value),ValidationError);
@@ -206,8 +207,8 @@ test('credential guard rejects apparent secrets in free-text documents and comme
   assert.ok(!redactCredentials('token: do_not_share_this_token').includes('do_not_share_this_token'));
 });
 
-test('expense amounts reject decimals and non-finite values before persistence',()=>{
-  const current=loadState(owner).data;
+test('expense amounts reject decimals and non-finite values before persistence',async ()=>{
+  const current=(await loadState(owner)).data;
   const value=structuredClone(current);
   const expense={id:'ex-test',title:'Hosting',projectId:'a',category:'زیرساخت',amount:123.45,date:'2026-11-18',status:'paid'};
   value.expenses=[expense];
@@ -216,19 +217,19 @@ test('expense amounts reject decimals and non-finite values before persistence',
   assert.equal(parseState(value).expenses[0].amount,123);
 });
 
-test('MFA recovery codes are random, stored as hashes, single-use and revoke existing sessions',()=>{
+test('MFA recovery codes are random, stored as hashes, single-use and revoke existing sessions',async ()=>{
   const {issueRecoveryCodes,verifyRecoveryCode,remainingRecoveryCodes}=require('../src/lib/server/mfa.ts');
-  const codes=issueRecoveryCodes(owner.id);
+  const codes=(await issueRecoveryCodes(owner.id));
   assert.equal(codes.length,10);
   assert.equal(new Set(codes).size,10);
-  assert.equal(remainingRecoveryCodes(owner.id),10);
+  assert.equal((await remainingRecoveryCodes(owner.id)),10);
   const row=getDb().prepare('SELECT code_hash FROM mfa_recovery_codes WHERE user_id=?').get(owner.id);
   assert.ok(!codes.includes(row.code_hash));
-  const token=newSession(owner.id);
+  const token=(await newSession(owner.id));
   assert.ok(token.length>10);
-  assert.equal(verifyRecoveryCode(owner.id,codes[0]),true);
-  assert.equal(verifyRecoveryCode(owner.id,codes[0]),false);
-  assert.equal(remainingRecoveryCodes(owner.id),9);
+  assert.equal((await verifyRecoveryCode(owner.id,codes[0])),true);
+  assert.equal((await verifyRecoveryCode(owner.id,codes[0])),false);
+  assert.equal((await remainingRecoveryCodes(owner.id)),9);
   assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id=?').get(owner.id).n,0);
 });
 
@@ -241,71 +242,71 @@ test('plaintext backup requires test-only explicit opt-in to avoid accidental da
   assert.equal(fs.existsSync(out),false);
 });
 
-test('workspace invitation is one-time, email-bound, short-lived and grants editor only assigned record kinds',()=>{
+test('workspace invitation is one-time, email-bound, short-lived and grants editor only assigned record kinds',async ()=>{
   const {createInvitation,acceptInvitation,listInvitations,removeMember}=require('../src/lib/server/invitations.ts');
-  const invite=createInvitation(owner,'editor@example.test','editor');
+  const invite=(await createInvitation(owner,'editor@example.test','editor'));
   assert.equal(invite.token.length,43);
-  assert.equal(listInvitations(owner).some(i=>i.id===invite.id&&i.active),true);
-  assert.throws(()=>acceptInvitation({token:invite.token,email:'attacker@example.test',displayName:'Intruder',password:'valid-password-123456'}));
-  const memberId=acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'valid-password-123456'});
-  assert.throws(()=>acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'valid-password-123456'}));
+  assert.equal((await listInvitations(owner)).some(i=>i.id===invite.id&&i.active),true);
+  await assert.rejects(async ()=>(await acceptInvitation({token:invite.token,email:'attacker@example.test',displayName:'Intruder',password:'valid-password-123456'})));
+  const memberId=(await acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'valid-password-123456'}));
+  await assert.rejects(async ()=>(await acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'valid-password-123456'})));
   const {accountByUser, ForbiddenError}=require('../src/lib/server/db.ts');
-  const editor=accountByUser(memberId);
+  const editor=(await accountByUser(memberId));
   assert.equal(editor.role,'editor');
-  assert.equal(loadState(editor).data.users[0].name,'Editor');
-  assert.throws(()=>saveState(editor,loadState(editor).version,parseState(loadState(editor).data)),ForbiddenError);
-  const current=loadState(editor);
-  assert.throws(()=>mutateRecord(editor,current.version,'projects','a','delete'),ForbiddenError);
+  assert.equal((await loadState(editor)).data.users[0].name,'Editor');
+  await assert.rejects(async ()=>(await saveState(editor,(await loadState(editor)).version,parseState((await loadState(editor)).data))),ForbiddenError);
+  const current=(await loadState(editor));
+  await assert.rejects(async ()=>(await mutateRecord(editor,current.version,'projects','a','delete')),ForbiddenError);
   const newTask=task('edited-task','a');
-  const updated=mutateRecord(editor,current.version,'tasks',newTask.id,'create',newTask);
+  const updated=(await mutateRecord(editor,current.version,'tasks',newTask.id,'create',newTask));
   assert.equal(updated,current.version+1);
-  assert.equal(loadState(owner).data.tasks.some(t=>t.id==='edited-task'),true);
-  const session=newSession(memberId);
-  assert.equal(removeMember(owner,memberId),true);
-  assert.equal(accountByUser(memberId),null);
+  assert.equal((await loadState(owner)).data.tasks.some(t=>t.id==='edited-task'),true);
+  const session=(await newSession(memberId));
+  assert.equal((await removeMember(owner,memberId)),true);
+  assert.equal((await accountByUser(memberId)),null);
   assert.equal(getDb().prepare('SELECT count(*) AS n FROM sessions WHERE user_id=?').get(memberId).n,0);
   assert.ok(session.length>20);
 });
 
-test('revoked invitations and forbidden non-owner invitations fail closed',()=>{
+test('revoked invitations and forbidden non-owner invitations fail closed',async ()=>{
   const {createInvitation,revokeInvitation,acceptInvitation,InvitationError}=require('../src/lib/server/invitations.ts');
-  const invite=createInvitation(owner,'viewer@example.test','viewer');
-  assert.equal(revokeInvitation(owner,invite.id),true);
-  assert.equal(revokeInvitation(owner,invite.id),false);
-  assert.throws(()=>acceptInvitation({token:invite.token,email:'viewer@example.test',displayName:'Viewer',password:'valid-password-123456'}),InvitationError);
-  assert.throws(()=>createInvitation({...owner,role:'editor'},'third@example.test','viewer'));
-  assert.throws(()=>createInvitation(owner,'owner@example.test','owner'),InvitationError);
+  const invite=(await createInvitation(owner,'viewer@example.test','viewer'));
+  assert.equal((await revokeInvitation(owner,invite.id)),true);
+  assert.equal((await revokeInvitation(owner,invite.id)),false);
+  await assert.rejects(async ()=>(await acceptInvitation({token:invite.token,email:'viewer@example.test',displayName:'Viewer',password:'valid-password-123456'})),InvitationError);
+  await assert.rejects(async ()=>(await createInvitation({...owner,role:'editor'},'third@example.test','viewer')));
+  await assert.rejects(async ()=>(await createInvitation(owner,'owner@example.test','owner')),InvitationError);
 });
 
-test('previously removed member can rejoin only with fresh invitation and correct prior password',()=>{
+test('previously removed member can rejoin only with fresh invitation and correct prior password',async ()=>{
   const {createInvitation,acceptInvitation}=require('../src/lib/server/invitations.ts');
-  const invite=createInvitation(owner,'editor@example.test','viewer');
+  const invite=(await createInvitation(owner,'editor@example.test','viewer'));
   const beforeFailures=getDb().prepare('SELECT failed_logins AS fails FROM users WHERE email=?').get('editor@example.test').fails;
-  assert.throws(()=>acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'incorrect-new-pass'}));
+  await assert.rejects(async ()=>(await acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'incorrect-new-pass'})));
   const afterFailures=getDb().prepare('SELECT failed_logins AS fails FROM users WHERE email=?').get('editor@example.test').fails;
   assert.equal(afterFailures,beforeFailures+1,'Invalid invitation-password attempts must not bypass lockout accounting');
-  const rejoined=acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'valid-password-123456'});
-  assert.equal(require('../src/lib/server/db.ts').accountByUser(rejoined).role,'viewer');
+  const rejoined=(await acceptInvitation({token:invite.token,email:'editor@example.test',displayName:'Editor',password:'valid-password-123456'}));
+  assert.equal((await require('../src/lib/server/db.ts').accountByUser(rejoined)).role,'viewer');
 });
 
-test('vault references accept only known HTTPS provider hosts and never arbitrary credentials URLs',()=>{
+test('vault references accept only known HTTPS provider hosts and never arbitrary credentials URLs',async ()=>{
   const {vaultLink}=require('../src/lib/vault-link.ts');
   assert.ok(vaultLink('https://start.1password.com/open/i?i=test'));
   assert.equal(vaultLink('https://evil.example/steal'),null);
   assert.equal(vaultLink('http://start.1password.com/item'),null);
   assert.equal(vaultLink('https://admin:password@start.1password.com/item'),null);
-  const value=structuredClone(loadState(owner).data);
+  const value=structuredClone((await loadState(owner)).data);
   value.secrets=[{id:'vault-ref',name:'SSH',projectId:'a',type:'SSH Key',vaultProvider:'1Password',externalRef:'https://evil.example/steal'}];
   assert.throws(()=>parseState(value),ValidationError);
   value.secrets[0].externalRef='https://start.1password.com/open/i?i=test';
   assert.equal(parseState(value).secrets.length,1);
 });
 
-test('legacy credential-like values are redacted before any workspace state is returned',()=>{
+test('legacy credential-like values are redacted before any workspace state is returned',async ()=>{
   const db=getDb(),doc=db.prepare("SELECT payload FROM records WHERE workspace_id=? AND kind='docs' AND id='doc'").get(owner.workspaceId);
   const value=JSON.parse(doc.payload);value.body='password: very-real-test-sample';
   db.prepare("UPDATE records SET payload=? WHERE workspace_id=? AND kind='docs' AND id='doc'").run(JSON.stringify(value),owner.workspaceId);
-  const loaded=loadState(owner);
+  const loaded=(await loadState(owner));
   assert.ok(!loaded.data.docs.find(d=>d.id==='doc').body.includes('very-real-test-sample'));
   db.prepare("UPDATE records SET payload=? WHERE workspace_id=? AND kind='docs' AND id='doc'").run(doc.payload,owner.workspaceId);
 });
@@ -351,55 +352,55 @@ test('free-text credential detection checks EVERY occurrence, not only an initia
   assert.equal(suspiciousCredential('password: placeholder and token: example'),false);
 });
 
-test('manual activity validates secrets, workspace ownership, historical actor and hourly quota',()=>{
+test('manual activity validates secrets, workspace ownership, historical actor and hourly quota',async ()=>{
   const {appendManualActivity,ActivityValidationError,ActivityRateLimitError}=require('../src/lib/server/manual-activity.ts');
-  assert.throws(()=>appendManualActivity(owner,{projectId:'a',title:'Unsafe',detail:'password: test-not-share'}),ActivityValidationError);
-  assert.throws(()=>appendManualActivity({...owner,role:'editor'},{projectId:'a',title:'Editor',detail:'Note'}));
-  assert.throws(()=>appendManualActivity(owner,{projectId:'another-workspace-project',title:'Invalid',detail:'Note'}),ActivityValidationError);
-  const id=appendManualActivity(owner,{projectId:'a',title:'Safe checkpoint',detail:'No credentials'});
+  await assert.rejects(async ()=>(await appendManualActivity(owner,{projectId:'a',title:'Unsafe',detail:'password: test-not-share'})),ActivityValidationError);
+  await assert.rejects(async ()=>(await appendManualActivity({...owner,role:'editor'},{projectId:'a',title:'Editor',detail:'Note'})));
+  await assert.rejects(async ()=>(await appendManualActivity(owner,{projectId:'another-workspace-project',title:'Invalid',detail:'Note'})),ActivityValidationError);
+  const id=(await appendManualActivity(owner,{projectId:'a',title:'Safe checkpoint',detail:'No credentials'}));
   const row=getDb().prepare('SELECT actor_snapshot,action FROM audit_events WHERE id=?').get(id);
   assert.equal(row.actor_snapshot,owner.displayName);
   assert.equal(row.action,'No credentials');
-  for(let n=1;n<30;n++)appendManualActivity(owner,{projectId:'a',title:'Checkpoint '+n,detail:'Safe note'});
-  assert.throws(()=>appendManualActivity(owner,{projectId:'a',title:'Excess',detail:'Safe note'}),ActivityRateLimitError);
+  for(let n=1;n<30;n++)(await appendManualActivity(owner,{projectId:'a',title:'Checkpoint '+n,detail:'Safe note'}));
+  await assert.rejects(async ()=>(await appendManualActivity(owner,{projectId:'a',title:'Excess',detail:'Safe note'})),ActivityRateLimitError);
 });
 
-test('existing MFA-protected members cannot bypass second factor via invitation reactivation',()=>{
+test('existing MFA-protected members cannot bypass second factor via invitation reactivation',async ()=>{
   const {createInvitation,acceptInvitation,removeMember}=require('../src/lib/server/invitations.ts');
-  const fresh=createInvitation(owner,'mfa-member@example.test','editor');
-  const member=acceptInvitation({token:fresh.token,email:'mfa-member@example.test',displayName:'MFA member',password:'valid-password-2026'});
-  const started=beginMfa(member,'mfa-member@example.test');
-  assert.equal(confirmMfa(member,totp(started.secret)),true);
-  assert.equal(removeMember(owner,member),true);
-  const invite=createInvitation(owner,'mfa-member@example.test','viewer');
+  const fresh=(await createInvitation(owner,'mfa-member@example.test','editor'));
+  const member=(await acceptInvitation({token:fresh.token,email:'mfa-member@example.test',displayName:'MFA member',password:'valid-password-2026'}));
+  const started=(await beginMfa(member,'mfa-member@example.test'));
+  assert.equal((await confirmMfa(member,totp(started.secret))),true);
+  assert.equal((await removeMember(owner,member)),true);
+  const invite=(await createInvitation(owner,'mfa-member@example.test','viewer'));
   const wrong={token:invite.token,email:'mfa-member@example.test',displayName:'MFA member',password:'valid-password-2026'};
-  assert.throws(()=>acceptInvitation(wrong));
-  assert.throws(()=>acceptInvitation({...wrong,totp:'000000'}));
+  await assert.rejects(async ()=>(await acceptInvitation(wrong)));
+  await assert.rejects(async ()=>(await acceptInvitation({...wrong,totp:'000000'})));
   assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM memberships WHERE user_id=?').get(member).n,0);
   // An invalid invitation must not trigger password lockout accounting for a victim user.
   const failures=getDb().prepare('SELECT failed_logins AS fails FROM users WHERE id=?').get(member).fails;
-  assert.throws(()=>acceptInvitation({...wrong,token:'z'.repeat(43),password:'bad-password-2026'}));
+  await assert.rejects(async ()=>(await acceptInvitation({...wrong,token:'z'.repeat(43),password:'bad-password-2026'})));
   assert.equal(getDb().prepare('SELECT failed_logins AS fails FROM users WHERE id=?').get(member).fails,failures);
   const nextStep=Math.floor(Date.now()/30000)+1;
-  assert.equal(acceptInvitation({...wrong,totp:totp(started.secret,nextStep)}),member);
+  assert.equal((await acceptInvitation({...wrong,totp:totp(started.secret,nextStep)})),member);
   assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM memberships WHERE user_id=?').get(member).n,1);
 });
 
-test('reminder worker disambiguates same-id sources and reconciles Telegram opt-in after an existing alert',()=>{
+test('reminder worker disambiguates same-id sources and reconciles Telegram opt-in after an existing alert',async ()=>{
   const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const now=loadState(owner),modified=structuredClone(now.data);
+  const now=(await loadState(owner)),modified=structuredClone(now.data);
   modified.preferences.renewal=true;
   modified.reminders=[{id:'duplicate-id',title:'Direct reminder',projectId:'a',kind:'تمدید',due:today},
     {id:'iso-due-reminder',title:'UTC due date',projectId:'a',kind:'یادآوری',due:new Date().toISOString().slice(0,10)+'T12:00:00Z'}];
   modified.resources.push({id:'duplicate-id',name:'Shared server',projectId:'a',linkedProjectIds:[],type:'server',address:'203.0.113.6',environment:'Production',status:'registered',provider:'Test',tags:[],expires:today});
   modified.charges.push({id:'duplicate-id',projectId:'a',title:'Same-id subscription',provider:'Test',amount:100,currency:'TOMAN',period:'monthly',nextDue:today,status:'active'});
-  saveState(owner,now.version,parseState(modified));
+  (await saveState(owner,now.version,parseState(modified)));
   const exec=(env)=>JSON.parse(execFileSync(process.execPath,[path.join(__dirname,'run-reminders.mjs')],{
-    env:{...process.env,PROJECTOS_TELEGRAM_NOTIFICATIONS:env?'enabled':'disabled',
+    env:{...process.env,PROJECTOS_NOTIFICATION_WORKSPACE:owner.workspaceId,PROJECTOS_TELEGRAM_NOTIFICATIONS:env?'enabled':'disabled',
       PROJECTOS_TELEGRAM_BOT_TOKEN:env?'12345:test-token-is-not-real-1234567890':'',PROJECTOS_TELEGRAM_CHAT_ID:env?'1234567':''},encoding:'utf8'}));
   const initial=exec(false);
   assert.ok(initial.generated>=4);
-  const incidents=loadState(owner).data.incidents;
+  const incidents=(await loadState(owner)).data.incidents;
   const matching=incidents.filter(i=>i.title.includes('Direct reminder')||i.title.includes('Shared server')||i.title.includes('Same-id subscription'));
   assert.equal(matching.length,3,'Each source must have its own alert even with matching IDs and dates');
   assert.ok(incidents.some(i=>i.title.includes('UTC due date')),'ISO due dates must not be silently skipped');
@@ -409,27 +410,27 @@ test('reminder worker disambiguates same-id sources and reconciles Telegram opt-
   assert.ok(exec(false).cancelledTelegram>=4,'Disabling Telegram cancels pending delivery');
   assert.equal(getDb().prepare("SELECT count(*) AS n FROM notification_outbox WHERE workspace_id=? AND channel='telegram' AND state='pending'").get(owner.workspaceId).n,0);
   assert.ok(exec(true).queuedTelegram>=4,'Re-enabling Telegram queues previously cancelled notifications');
-  assert.equal(loadState(owner).data.incidents.filter(i=>i.id.startsWith('auto-')).length,incidents.filter(i=>i.id.startsWith('auto-')).length);
+  assert.equal((await loadState(owner)).data.incidents.filter(i=>i.id.startsWith('auto-')).length,incidents.filter(i=>i.id.startsWith('auto-')).length);
 });
 
-test('reminder identity and delivery history survive removal of colliding sources',()=>{
+test('reminder identity and delivery history survive removal of colliding sources',async ()=>{
   const worker=()=>execFileSync(process.execPath,[path.join(__dirname,'run-reminders.mjs')],{
-    env:{...process.env,PROJECTOS_TELEGRAM_NOTIFICATIONS:'enabled',
-      PROJECTOS_TELEGRAM_BOT_TOKEN:'12345:synthetic-test-only',PROJECTOS_TELEGRAM_CHAT_ID:'1234567'},
+    env:{...process.env,PROJECTOS_NOTIFICATION_WORKSPACE:owner.workspaceId,PROJECTOS_TELEGRAM_NOTIFICATIONS:'enabled',
+      PROJECTOS_TELEGRAM_BOT_TOKEN:'12345:synthetic-test-only-longer',PROJECTOS_TELEGRAM_CHAT_ID:'1234567'},
     encoding:'utf8',
   });
   const db=getDb();
-  const state=loadState(owner);
+  const state=(await loadState(owner));
   const survivor=state.data.incidents.find(incident=>incident.title.includes('Direct reminder'));
   assert.ok(survivor);
   const update=db.prepare("UPDATE notification_outbox SET state='delivered',delivered_at=? WHERE workspace_id=? AND id=?");
   assert.equal(update.run(new Date().toISOString(),owner.workspaceId,'tg-'+survivor.id).changes,1);
-  saveState(owner,state.version,parseState({...state.data,
+  (await saveState(owner,state.version,parseState({...state.data,
     resources:state.data.resources.filter(item=>item.id!=='duplicate-id'),
     charges:state.data.charges.filter(item=>item.id!=='duplicate-id'),
-  }));
+  })));
   worker();
-  const after=loadState(owner).data.incidents.filter(incident=>incident.title.includes('Direct reminder'));
+  const after=(await loadState(owner)).data.incidents.filter(incident=>incident.title.includes('Direct reminder'));
   assert.deepEqual(after.map(incident=>incident.id),[survivor.id]);
   const entries=db.prepare("SELECT id,state FROM notification_outbox WHERE workspace_id=? AND channel='telegram' AND reminder_id='reminders:duplicate-id'").all(owner.workspaceId);
   assert.deepEqual(entries.map(row=>[row.id,row.state]),[['tg-'+survivor.id,'delivered']]);
@@ -470,35 +471,35 @@ test('origin protection rejects cross-site mutations and fails closed when produ
   }
 });
 
-test('user changes cannot forge, delete or rewrite worker-owned auto-reminder provenance',()=>{
-  const before=loadState(owner),automatic=before.data.incidents.find(i=>i.id.startsWith('auto-'));
+test('user changes cannot forge, delete or rewrite worker-owned auto-reminder provenance',async ()=>{
+  const before=(await loadState(owner)),automatic=before.data.incidents.find(i=>i.id.startsWith('auto-'));
   assert.ok(automatic,'Test setup should have a worker-generated incident');
   const forged=structuredClone(before.data);
   forged.incidents.push({...automatic,id:'auto-'+crypto.randomBytes(14).toString('hex')});
-  assert.throws(()=>saveState(owner,before.version,parseState(forged)));
+  await assert.rejects(async ()=>(await saveState(owner,before.version,parseState(forged))));
   const rewritten=structuredClone(before.data);
   rewritten.incidents.find(i=>i.id===automatic.id).title='Misleading renewal';
-  assert.throws(()=>saveState(owner,before.version,parseState(rewritten)));
+  await assert.rejects(async ()=>(await saveState(owner,before.version,parseState(rewritten))));
   const deleted=structuredClone(before.data);
   deleted.incidents=deleted.incidents.filter(i=>i.id!==automatic.id);
-  assert.throws(()=>saveState(owner,before.version,parseState(deleted)));
+  await assert.rejects(async ()=>(await saveState(owner,before.version,parseState(deleted))));
   const acknowledged=structuredClone(before.data);
   acknowledged.incidents.find(i=>i.id===automatic.id).state='acknowledged';
-  assert.equal(saveState(owner,before.version,parseState(acknowledged)),before.version+1);
+  assert.equal((await saveState(owner,before.version,parseState(acknowledged))),before.version+1);
 });
 
-test('authenticated sessions expire after inactivity as well as absolute lifetime',()=>{
+test('authenticated sessions expire after inactivity as well as absolute lifetime',async ()=>{
   const {lookupSessionUserId}=require('../src/lib/server/auth.ts');
-  const token=newSession(owner.id);
-  assert.equal(lookupSessionUserId(token),owner.id);
+  const token=(await newSession(owner.id));
+  assert.equal((await lookupSessionUserId(token)),owner.id);
   const hash=crypto.createHash('sha256').update(token).digest('hex');
   getDb().prepare('UPDATE sessions SET last_seen_at=? WHERE token_hash=?')
     .run(Date.now()-25*60*60*1000,hash);
-  assert.equal(lookupSessionUserId(token),null);
-  const fresh=newSession(owner.id),freshHash=crypto.createHash('sha256').update(fresh).digest('hex');
+  assert.equal((await lookupSessionUserId(token)),null);
+  const fresh=(await newSession(owner.id)),freshHash=crypto.createHash('sha256').update(fresh).digest('hex');
   getDb().prepare('UPDATE sessions SET expires_at=? WHERE token_hash=?')
     .run(Date.now()-1000,freshHash);
-  assert.equal(lookupSessionUserId(fresh),null);
+  assert.equal((await lookupSessionUserId(fresh)),null);
 });
 
 test('streaming restore preserves compatibility with historical v1 backups and rejects tampering',async()=>{
@@ -519,10 +520,10 @@ test('streaming restore preserves compatibility with historical v1 backups and r
   const original=fs.readFileSync(archive);original[original.length-4]^=0xff;
   fs.writeFileSync(archive,original);
   assert.notEqual(run().status,0,'Ciphertext modifications must fail authenticated decryption');
-  assert.ok(loadState(owner).data.projects.length>0,'Verification never mutates active database');
+  assert.ok((await loadState(owner)).data.projects.length>0,'Verification never mutates active database');
 });
 
-test('unrelated record and snapshot writes preserve masked legacy documents and their history',()=>{
+test('unrelated record and snapshot writes preserve masked legacy documents and their history',async ()=>{
   const db=getDb();
   const read=db.prepare("SELECT payload,updated_at FROM records WHERE workspace_id=? AND kind='docs' AND id='doc'");
   const write=db.prepare("UPDATE records SET payload=? WHERE workspace_id=? AND kind='docs' AND id='doc'");
@@ -531,12 +532,12 @@ test('unrelated record and snapshot writes preserve masked legacy documents and 
   write.run(legacy,owner.workspaceId);
   try{
     const stored=read.get(owner.workspaceId);
-    const before=loadState(owner);
+    const before=(await loadState(owner));
     assert.equal(before.data.docs.find(doc=>doc.id==='doc').body,'[REDACTED CREDENTIAL]');
-    mutateRecord(owner,before.version,'tasks','legacy-roundtrip','create',task('legacy-roundtrip','a'));
-    const next=loadState(owner);
+    (await mutateRecord(owner,before.version,'tasks','legacy-roundtrip','create',task('legacy-roundtrip','a')));
+    const next=(await loadState(owner));
     assert.ok(next.data.tasks.some(item=>item.id==='legacy-roundtrip'));
-    saveState(owner,next.version,parseState({...next.data,tasks:next.data.tasks.filter(item=>item.id!=='legacy-roundtrip')}));
+    (await saveState(owner,next.version,parseState({...next.data,tasks:next.data.tasks.filter(item=>item.id!=='legacy-roundtrip')})));
     assert.deepEqual(read.get(owner.workspaceId),stored);
     assert.equal(getDb().prepare("SELECT count(*) AS n FROM audit_events WHERE workspace_id=? AND kind='docs' AND title LIKE '%synthetic-legacy-sample%'").get(owner.workspaceId).n,0);
   }finally{
@@ -544,8 +545,8 @@ test('unrelated record and snapshot writes preserve masked legacy documents and 
   }
 });
 
-test('contract ranges compare UTC instants across accepted ISO precisions',()=>{
-  const state=loadState(owner).data;
+test('contract ranges compare UTC instants across accepted ISO precisions',async ()=>{
+  const state=(await loadState(owner)).data;
   const contract={id:'contract-precision',projectId:'a',title:'Annual plan',client:'Client',currency:'USD',amount:1200,state:'draft'};
   state.contracts=[{...contract,start:'2026-11-18T13:30Z',end:'2026-11-18T13:30:01.000Z'}];
   assert.equal(parseState(state).contracts.length,1);
@@ -553,11 +554,109 @@ test('contract ranges compare UTC instants across accepted ISO precisions',()=>{
   assert.throws(()=>parseState(state),/Contract end before start/);
 });
 
-test('task comment timestamps must be valid calendar dates and UTC times',()=>{
-  const state=loadState(owner).data;
+test('task comment timestamps must be valid calendar dates and UTC times',async ()=>{
+  const state=(await loadState(owner)).data;
   const item=task('comment-calendar','a');
   state.tasks=[{...item,comments:[{text:'Invalid day',date:'2026-02-30T14:00Z'}]}];
   assert.throws(()=>parseState(state),/Invalid calendar date/);
   state.tasks=[{...item,comments:[{text:'Valid leap day',date:'2028-02-29T14:00Z'}]}];
   assert.equal(parseState(state).tasks.length,1);
+});
+
+test('calendar recurrence clamps month end and keeps wall-calendar dates over DST',async ()=>{
+  const {occurrences}=await import('./reminder-scheduler.mjs');
+  assert.deepEqual(occurrences('2026-01-31','monthly','UTC','2026-02-01','2026-04-30'),
+    ['2026-02-28','2026-03-31','2026-04-30']);
+  assert.deepEqual(occurrences('2026-03-28T23:30Z','daily','Europe/Berlin','2026-03-28','2026-03-31'),
+    ['2026-03-29','2026-03-30','2026-03-31']);
+});
+
+test('expired notification lease can be reclaimed and a stale worker cannot finalize it',async ()=>{
+  const {claimDelivery,finishDelivery}=await import('./notification-delivery.mjs');
+  const now=Date.now();
+  const id='synthetic-email-lease';
+  getDb().prepare(`INSERT INTO notification_outbox(id,workspace_id,reminder_id,scheduled_for,channel,state,created_at)
+    VALUES(?,?,?,?,?,'pending',?)`).run(id,owner.workspaceId,'synthetic-lease-source','2026-11-19','email',new Date(now).toISOString());
+  const acquired=await claimDelivery(owner.workspaceId,'email',now);
+  assert.equal(acquired.id,id);
+  assert.equal(await claimDelivery(owner.workspaceId,'email',now+1000),undefined);
+  const recovered=await claimDelivery(owner.workspaceId,'email',now+120001);
+  assert.equal(recovered.id,id);
+  assert.equal(recovered.attempts,2);
+  assert.notEqual(recovered.lease,acquired.lease);
+  assert.equal(await finishDelivery(acquired,true,now+120002),false);
+  assert.equal(await finishDelivery(recovered,true,now+120002),true);
+  assert.equal(getDb().prepare('SELECT state FROM notification_outbox WHERE id=?').get(id).state,'delivered');
+});
+
+test('Vault metadata probe uses the approved metadata path and discards provider data',async ()=>{
+  const {verifyVaultReference}=require('../src/lib/server/vault.ts');
+  const pointer={vaultProvider:'HashiCorp Vault',vaultMount:'kv',vaultPath:'project/reference'};
+  const settings={origin:'https://vault.example.test',token:'synthetic-fixture-token',mounts:new Set(['kv'])};
+  let calls=0;
+  const stub=async (url,options)=>{
+    calls++;
+    assert.equal(url.href,'https://vault.example.test/v1/kv/metadata/project/reference');
+    assert.equal(options.redirect,'error');
+    assert.equal(options.method,'GET');
+    return Response.json({data:{current_version:3,versions:{3:{destroyed:false,deletion_time:''}},unrelated:'discard'}});
+  };
+  assert.deepEqual(await verifyVaultReference(pointer,settings,stub),{status:'verified',providerVersion:3});
+  assert.deepEqual(await verifyVaultReference({...pointer,vaultMount:'other'},settings,stub),{status:'not_configured',providerVersion:null});
+  assert.equal(calls,1);
+  assert.equal((await verifyVaultReference(pointer,settings,async()=>new Response(null,{status:403}))).status,'unknown');
+  assert.equal((await verifyVaultReference(pointer,settings,async()=>{throw Error('simulated outage');})).status,'unknown');
+});
+
+test('GitHub quota is reported with a retry timestamp and signed data is validated',async ()=>{
+  const {syncRepository,signedDelivery}=require('../src/lib/server/github.ts');
+  const clock=new Date('2026-11-19T00:00:00.000Z');
+  let attempts=0;
+  const result=await syncRepository('synthetic/example','synthetic-token',async()=>{
+    attempts++;
+    return new Response(null,{status:429,headers:{'Retry-After':'90'}});
+  },clock);
+  assert.equal(attempts,1);
+  assert.equal(result.state,'rate_limited');
+  assert.equal(result.retryAt,'2026-11-19T00:01:30.000Z');
+  const raw=Buffer.from('{"repository":{"full_name":"synthetic/example"}}');
+  const key='synthetic-webhook-test-fixture-only';
+  const signature='sha256='+crypto.createHmac('sha256',key).update(raw).digest('hex');
+  assert.equal(signedDelivery(raw,signature,key),true);
+  assert.equal(signedDelivery(Buffer.from('changed fixture'),signature,key),false);
+  assert.equal(signedDelivery(raw,null,key),false);
+});
+
+test('HTTPS monitor declines private DNS answers before opening a connection',async ()=>{
+  const {probeHttps}=await import('./monitor-probe.mjs');
+  const allow=new Set(['probe.projectos-sandbox.net']);
+  let attempted=false;
+  await assert.rejects(probeHttps('https://probe.projectos-sandbox.net',allow,{
+    resolve:async()=>[{address:'127.0.0.1',family:4}],
+    connect:()=>{attempted=true;throw Error('no socket should open');},
+  }),/Public DNS verification failed/);
+  assert.equal(attempted,false);
+});
+
+test('multi-currency totals have exact minor units and CSV neutralizes spreadsheet formulas',()=>{
+  const {parseAmount,totalsByCurrency}=require('../src/lib/money.ts');
+  const {csv}=require('../src/lib/format.ts');
+  assert.equal(parseAmount('23.50','USD'),2350);
+  assert.equal(parseAmount('23.50','TOMAN'),undefined);
+  assert.equal(parseAmount('999999999999999999','USD'),undefined);
+  const totals=totalsByCurrency([{amount:100,currency:'USD'},{amount:2350,currency:'USD',amountUnit:'minor'},
+    {amount:10,currency:'IRR'},...Array.from({length:10_000},()=>({amount:1e12}))]);
+  assert.equal(totals.get('TOMAN'),BigInt('10000000000000000'));
+  assert.equal(totals.get('IRR'),BigInt(10));
+  assert.equal(totals.get('USD'),BigInt(12350));
+  const sheet=csv([['＝1+1','مرحله',123]]);
+  assert.ok(sheet.includes('"\'＝1+1"'));
+});
+
+test('model citations accept literal permitted text and reject unsupported or wrong-source output',()=>{
+  const {verifyQuotes}=require('../src/lib/server/project-memory.ts');
+  const sources=[{id:'doc:test',excerpt:'Synthetic support sentence.'}];
+  assert.equal(verifyQuotes(JSON.stringify({quotes:[{id:'doc:test',quote:'support sentence.'}]}),sources).length,1);
+  assert.deepEqual(verifyQuotes(JSON.stringify({quotes:[{id:'doc:test',quote:'unverified text'}]}),sources),[]);
+  assert.deepEqual(verifyQuotes(JSON.stringify({quotes:[{id:'doc:outside',quote:'support sentence.'}]}),sources),[]);
 });

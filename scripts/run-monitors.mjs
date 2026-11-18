@@ -1,65 +1,55 @@
 #!/usr/bin/env node
-/** Explicit opt-in HTTPS health checks. DNS-pinned public IPv4 only; no redirects or user-supplied fetch URL. */
-import { DatabaseSync } from 'node:sqlite';
-import { lookup } from 'node:dns/promises';
-import { request } from 'node:https';
-import { isIP } from 'node:net';
-import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
-const dbPath=resolve(process.env.PROJECTOS_DB_PATH||'./local-data/projectos.sqlite');
-const hosts=(process.env.PROJECTOS_MONITOR_HOSTS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-if(!hosts.length){console.error('Monitoring disabled. Explicitly set PROJECTOS_MONITOR_HOSTS to comma-separated public HTTPS hostnames.');process.exit(2);}
-if(!existsSync(dbPath)){console.error('Database not found');process.exit(2);}
-function isPublicIPv4(ip){
-  if(isIP(ip)!==4)return false;
-  const [a,b,c]=ip.split('.').map(Number);
-  return !(a===0||a===10||a===127||a>=224||(a===100&&b>=64&&b<=127)||
-    (a===169&&b===254)||(a===172&&b>=16&&b<=31)||(a===192&&(b===168||b===0||b===2))||
-    (a===198&&(b===18||b===19||b===51&&c===100))||
-    (a===203&&b===0&&c===113)||(a===192&&b===88&&c===99)||a===255);
-}
-function validHost(host){return host.length<=253&&!host.endsWith('.')&&!host.includes('..')&&!isIP(host)&&
-  !/(^|\.)(localhost|local|internal|test|invalid|example)$/.test(host)&&
-  /^[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/.test(host)&&host.includes('.');}
-export async function probeHttps(url){
-  const target=new URL(url);
-  if(target.protocol!=='https:'||target.username||target.password||target.port||target.hash||target.search||target.pathname!=='/'||!validHost(target.hostname)||!hosts.includes(target.hostname))throw Error('Monitor target not explicitly permitted');
-  const records=await lookup(target.hostname,{family:4,all:true,verbatim:true});
-  if(!records.length||records.some(r=>!isPublicIPv4(r.address)))throw Error('Public IPv4 DNS verification failed');
-  const address=records[0].address;
-  const begun=Date.now();
-  return await new Promise((success,reject)=>{
-    // Pin DNS lookup to the validated numeric address; TLS verifies the hostname.
-    const req=request(target,{method:'HEAD',timeout:7000,signal:AbortSignal.timeout(10000),maxHeaderSize:8192,headers:{'User-Agent':'ProjectOS-Monitor/1.0'},
-      lookup:(_host,_opts,callback)=>callback(null,address,4)},res=>{
-      res.resume();
-      res.on('end',()=>success({status:res.statusCode||0,latencyMs:Date.now()-begun,healthy:(res.statusCode||0)>=200&&(res.statusCode||0)<400}));
-    });
-    req.on('timeout',()=>req.destroy(Error('Health check timed out')));
-    req.on('error',reject);req.end();
-  });
-}
-const db=new DatabaseSync(dbPath,{timeout:5000});
-try{
-  db.exec(`PRAGMA busy_timeout=5000;CREATE TABLE IF NOT EXISTS monitor_observations(
-    id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, resource_id TEXT NOT NULL,
-    checked_at TEXT NOT NULL, state TEXT NOT NULL, status_code INTEGER, latency_ms INTEGER,
-    diagnostic TEXT NOT NULL, UNIQUE(workspace_id,resource_id,checked_at));
-    CREATE INDEX IF NOT EXISTS idx_observation_latest ON monitor_observations(workspace_id,resource_id,checked_at DESC);`);
-  let tested=0;
-  const resources=db.prepare("SELECT workspace_id,id,payload FROM records WHERE kind='resources'").all();
-  for(const row of resources){
-    if(tested>=100)break;
-    let resource;try{resource=JSON.parse(row.payload);}catch{continue;}
-    if(typeof resource.address!=='string')continue;
-    let host;try{host=new URL(resource.address).hostname.toLowerCase();}catch{continue;}
-    if(!hosts.includes(host))continue;
-    tested++;
-    let observation;
-    try{observation=await probeHttps(resource.address);}
-    catch{observation={status:null,latencyMs:null,healthy:null};}
-    db.prepare('INSERT INTO monitor_observations(workspace_id,resource_id,checked_at,state,status_code,latency_ms,diagnostic) VALUES(?,?,?,?,?,?,?)')
-      .run(row.workspace_id,row.id,new Date().toISOString(),observation.healthy===null?'unknown':observation.healthy?'healthy':'unhealthy',observation.status,observation.latencyMs,observation.healthy===null?'HTTPS could not be verified':observation.healthy?'HTTPS check passed':'HTTPS check failed');
+import { createHash } from 'node:crypto';
+import { closeDatabase, lockWorkspace, sql, transaction } from './database.mjs';
+import { probeHttps } from './monitor-probe.mjs';
+
+const hosts = new Set((process.env.PROJECTOS_MONITOR_HOSTS ?? '').split(',').map(host => host.trim().toLowerCase()).filter(Boolean));
+const workspace = process.env.PROJECTOS_MONITOR_WORKSPACE;
+
+async function run() {
+  if (!hosts.size || !workspace) throw new Error('Monitoring workspace and HTTPS hosts are required');
+  const rows = await sql.all("SELECT id,payload FROM records WHERE kind='resources' AND workspace_id=? ORDER BY id", workspace);
+  const candidates = rows.filter(row => {
+    try { return hosts.has(new URL(JSON.parse(row.payload).address).hostname.toLowerCase()); }
+    catch { return false; }
+  }).slice(0,100);
+  let tested = 0;
+  // Limit parallel sockets so one maintenance cycle has predictable resource use.
+  for (let offset = 0; offset < candidates.length; offset += 5) {
+    await Promise.all(candidates.slice(offset,offset+5).map(async row => {
+      const resource = JSON.parse(row.payload);
+      let observation;
+      try { observation = await probeHttps(resource.address, hosts); }
+      catch { observation = {state:'unknown', status:null, latency:null, tlsExpiresAt:null}; }
+      const at = new Date().toISOString();
+      await transaction(async db => {
+        const scope = await lockWorkspace(db, workspace);
+        if (!scope) return;
+        const current = await db.one("SELECT payload FROM records WHERE workspace_id=? AND kind='resources' AND id=?", workspace, row.id);
+        if (!current || JSON.parse(current.payload).address !== resource.address) return;
+        await db.run(`INSERT INTO monitor_observations(workspace_id,resource_id,checked_at,state,status_code,latency_ms,diagnostic,source,tls_expires_at)
+          VALUES(?,?,?,?,?,?,?,'https',?) ON CONFLICT DO NOTHING`,
+        workspace,row.id,at,observation.state,observation.status,observation.latency,'HTTPS probe',observation.tlsExpiresAt);
+        tested++;
+        const preferences = await db.one("SELECT payload FROM records WHERE workspace_id=? AND kind='preferences' AND id='singleton'", workspace);
+        if (!preferences || !JSON.parse(preferences.payload).outage || observation.state !== 'unhealthy') return;
+        const id = 'monitor-' + createHash('sha256').update(JSON.stringify([workspace,row.id])).digest('hex').slice(0,28);
+        const incident = {id,projectId:JSON.parse(current.payload).projectId,title:'پاسخ ناموفق HTTPS',priority:'high',
+          source:'پایش HTTPS · ثبت خودکار',date:at,state:'open'};
+        const changed = await db.run(`INSERT INTO records(workspace_id,kind,id,project_id,payload,updated_at,record_version)
+          VALUES(?,'incidents',?,?,?,?,?) ON CONFLICT DO NOTHING`,
+        workspace,id,incident.projectId,JSON.stringify(incident),at,scope.version+1);
+        if (changed) await db.run('UPDATE workspaces SET version=version+1 WHERE id=?',workspace);
+      });
+    }));
   }
-  console.log(JSON.stringify({tested,loggedAt:new Date().toISOString(),mode:'explicit-host-allowlist'}));
-}finally{db.close();}
+  await sql.run(`INSERT INTO worker_heartbeats(name,checked_at) VALUES('monitors',?)
+    ON CONFLICT(name) DO UPDATE SET checked_at=excluded.checked_at`,new Date().toISOString());
+  return { tested, loggedAt:new Date().toISOString(), source:'https' };
+}
+
+try { console.log(JSON.stringify(await run())); }
+catch (error) {
+  console.error('Monitor worker failed:',error.code ?? error.name);
+  process.exitCode = 1;
+} finally { await closeDatabase(); }

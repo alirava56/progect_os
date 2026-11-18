@@ -1,130 +1,230 @@
-import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { cookies } from 'next/headers';
 import type { NextRequest } from 'next/server';
-import { accountByUser, getDb, transaction, userCount, type Account } from './db';
+import { lockBootstrap } from '../../../scripts/database.mjs';
+import { accountByUser, ForbiddenError, sql, transaction, userCount, type Account, type SqlExecutor } from './db';
+import { redactCredentials, suspiciousCredential } from './credential-guard';
 
-export const COOKIE = process.env.NODE_ENV==='production' ? '__Host-projectos_session' : 'projectos_session';
-const SESSION_SECONDS=7*24*60*60;
-const SESSION_IDLE_MS=24*60*60*1000;
-const hashed = (token:string) => createHash('sha256').update(token).digest('hex');
-const safeEq=(a:string,b:string) => {
-  const x=createHash('sha256').update(a).digest(), y=createHash('sha256').update(b).digest();
-  return timingSafeEqual(x,y);
-};
-export function passwordHash(password:string,salt:string){return scryptSync(password,salt,64,{N:16384,r:8,p:1}).toString('hex');}
-export function checkOrigin(request:NextRequest) {
-  const origin = request.headers.get('origin');
-  // Require an explicit, same-origin browser request; never trust forwarded host headers.
-  const declared=process.env.PROJECTOS_PUBLIC_ORIGIN;
-  // Production must declare a canonical origin; never derive it from untrusted Host headers.
-  if(process.env.NODE_ENV==='production'&&!declared)return false;
-  const expected=declared||request.nextUrl.origin;
-  return !!origin && origin===expected && ['same-origin','none',null].includes(request.headers.get('sec-fetch-site'));
+export const COOKIE = process.env.NODE_ENV === 'production' ? '__Host-projectos_session' : 'projectos_session';
+const SESSION_SECONDS = 7 * 24 * 60 * 60;
+export const SESSION_IDLE_MS = 24 * 60 * 60 * 1000;
+export const hash = (token: string) => createHash('sha256').update(token).digest('hex');
+
+function canonicalOrigin(value: string | undefined) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.origin !== value) return null;
+    if (url.protocol === 'https:' || (url.protocol === 'http:' && local(url.hostname))) return value;
+  } catch { /* malformed operator configuration */ }
+  return null;
 }
-export function validatePassword(password:unknown) {
-  return typeof password==='string' && password.length >=12 && password.length <=128 && !/[\u0000-\u001f]/.test(password);
+
+function local(hostname: string) {
+  return ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
 }
-export function normalizeEmail(email:unknown):string | null {
-  if(typeof email!=='string')return null;
-  const normalized=email.trim().toLowerCase();
-  return normalized.length<=254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)?normalized:null;
+
+export function requireMfa() {
+  const configured = process.env.PROJECTOS_PUBLIC_ORIGIN;
+  if (process.env.PROJECTOS_REQUIRE_MFA === 'enabled') return true;
+  if (process.env.NODE_ENV !== 'production') return false;
+  const origin = canonicalOrigin(configured);
+  return !origin || !local(new URL(origin).hostname);
 }
-export function setupOwner(input:{setupToken:unknown;email:unknown;password:unknown;displayName:unknown;workspace:unknown}) {
+
+export function checkOrigin(request: NextRequest) {
+  const configured = process.env.PROJECTOS_PUBLIC_ORIGIN;
+  const expected = configured || process.env.NODE_ENV === 'production'
+    ? canonicalOrigin(configured)
+    : request.nextUrl.origin;
+  return expected !== null && request.headers.get('origin') === expected
+    && ['same-origin', 'none', null].includes(request.headers.get('sec-fetch-site'));
+}
+
+export function passwordHash(password: string, salt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (error, key) => {
+      if (error) reject(error);
+      else resolve(key.toString('hex'));
+    });
+  });
+}
+
+export function validatePassword(password: unknown): password is string {
+  return typeof password === 'string' && password.length >= 12 && password.length <= 128 && !/[\u0000-\u001f]/.test(password);
+}
+
+export function normalizeEmail(email: unknown): string | null {
+  if (typeof email !== 'string') return null;
+  const value = email.trim().toLowerCase();
+  return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && !suspiciousCredential(value) ? value : null;
+}
+
+export function safeDisplayLabel(label: unknown): string | undefined {
+  if (typeof label !== 'string') return;
+  const value = label.trim();
+  if (!value || value.length > 80 || /[\u0000-\u001f]/.test(value) || suspiciousCredential(value)) return;
+  return value;
+}
+
+export async function setupOwner(input: {setupToken: unknown; email: unknown; password: unknown; displayName: unknown; workspace: unknown}) {
   const setup = process.env.PROJECTOS_SETUP_TOKEN;
-  if (!setup || setup.length <24 || typeof input.setupToken!=='string' || !safeEq(input.setupToken,setup)) throw new Error('SETUP_FORBIDDEN');
-  const email=normalizeEmail(input.email), password=input.password, displayName=typeof input.displayName==='string'?input.displayName.trim():'', workspace=typeof input.workspace==='string'?input.workspace.trim():'';
-  if(!email || !validatePassword(password) || !displayName || displayName.length>80 || !workspace || workspace.length>80) throw new Error('INVALID_INPUT');
-  return transaction(db=>{
-    const exists=(db.prepare('SELECT COUNT(*) AS count FROM users').get() as {count:number}).count;
-    if(exists) throw new Error('SETUP_CLOSED');
-    const id=randomUUID(), ws=randomUUID(),salt=randomBytes(24).toString('hex'),now=new Date().toISOString();
-    db.prepare('INSERT INTO users(id,email,display_name,password_hash,salt,created_at) VALUES(?,?,?,?,?,?)').run(id,email,displayName,passwordHash(password as string,salt),salt,now);
-    db.prepare('INSERT INTO workspaces(id,name,created_at) VALUES(?,?,?)').run(ws,workspace,now);
-    db.prepare('INSERT INTO memberships(user_id,workspace_id,role) VALUES(?,?,?)').run(id,ws,'owner');
+  if (!setup || setup.length < 24 || typeof input.setupToken !== 'string' || input.setupToken.length > 1024
+    || !timingSafeEqual(Buffer.from(hash(setup), 'hex'), Buffer.from(hash(input.setupToken), 'hex'))) {
+    throw new Error('SETUP_FORBIDDEN');
+  }
+  const email = normalizeEmail(input.email);
+  const { password } = input;
+  const displayName = safeDisplayLabel(input.displayName);
+  const workspace = safeDisplayLabel(input.workspace);
+  if (!email || !validatePassword(password) || !displayName || !workspace) throw new Error('INVALID_INPUT');
+  const salt = randomBytes(24).toString('hex');
+  const digest = await passwordHash(password, salt);
+  return transaction(async db => {
+    await lockBootstrap(db);
+    const exists = await db.one('SELECT id FROM users LIMIT 1');
+    if (exists) throw new Error('SETUP_CLOSED');
+    const id = randomUUID(), workspaceId = randomUUID(), now = new Date().toISOString();
+    await db.run('INSERT INTO users(id,email,display_name,password_hash,salt,created_at) VALUES(?,?,?,?,?,?)',
+      id, email, displayName, digest, salt, now);
+    await db.run('INSERT INTO workspaces(id,name,created_at) VALUES(?,?,?)', workspaceId, workspace, now);
+    await db.run('INSERT INTO memberships(user_id,workspace_id,role) VALUES(?,?,?)', id, workspaceId, 'owner');
     return id;
   });
 }
 
-export function authenticate(email:unknown,password:unknown):string|null {
-  const normalized=normalizeEmail(email);
-  if(!normalized||typeof password!=='string'||password.length>128)return null;
-  const db=getDb();
-  const row=db.prepare('SELECT id,password_hash,salt,failed_logins,locked_until FROM users WHERE email=?').get(normalized) as {id:string;password_hash:string;salt:string;failed_logins:number;locked_until:number}|undefined;
-  const fallbackSalt='00'.repeat(24),fallbackHash='00'.repeat(64);
-  const attempt=passwordHash(password,row?.salt??fallbackSalt);
-  const expected=Buffer.from(row?.password_hash??fallbackHash,'hex');
-  const valid=expected.length===64 && timingSafeEqual(Buffer.from(attempt,'hex'),expected);
-  if(!row)return null;
-  if(row.locked_until>Date.now())return null;
-  if(!valid){
-    const fails=row.failed_logins+1;
-    db.prepare('UPDATE users SET failed_logins=?,locked_until=? WHERE id=?').run(fails,fails>=5?Date.now()+15*60*1000:0,row.id);
-    return null;
+export async function authenticate(email: unknown, password: unknown) {
+  if (typeof password !== 'string' || password.length > 128) return null;
+  const normalized = normalizeEmail(email);
+  const row = await sql.one<{id: string; password_hash: string; salt: string}>(
+    'SELECT id,password_hash,salt FROM users WHERE email=?', normalized ?? '',
+  );
+  const candidate = await passwordHash(password, row?.salt ?? '00'.repeat(24));
+  const expected = Buffer.from(row?.password_hash ?? '00'.repeat(64), 'hex');
+  const matches = expected.length === 64 && timingSafeEqual(Buffer.from(candidate, 'hex'), expected);
+  if (row) {
+    if (matches) await sql.run('UPDATE users SET failed_logins=0,locked_until=0 WHERE id=? AND (failed_logins<>0 OR locked_until<>0)', row.id);
+    else await sql.run('UPDATE users SET failed_logins=CASE WHEN failed_logins<1000 THEN failed_logins+1 ELSE failed_logins END WHERE id=?', row.id);
   }
-  db.prepare('UPDATE users SET failed_logins=0,locked_until=0 WHERE id=?').run(row.id);
-  return row.id;
+  return matches && row ? row.id : null;
 }
 
-export function newSession(userId:string) {
-  const token=randomBytes(32).toString('base64url');
-  const timestamp=Date.now();
-  const db=getDb();
-  db.prepare('DELETE FROM sessions WHERE expires_at<?').run(timestamp);
-  db.prepare('INSERT INTO sessions(token_hash,user_id,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?)')
-    .run(hashed(token),userId,timestamp,timestamp+SESSION_SECONDS*1000,timestamp);
+export async function rateLimit(
+  scope: string, bucket: string, limit: number, windowMs: number, timestamp = Date.now(), db = sql,
+) {
+  const expiresAt = Math.floor(timestamp / windowMs) * windowMs + windowMs;
+  const row = await db.one<{hits: number}>(`INSERT INTO auth_rate_limits(scope,bucket,expires_at,hits) VALUES(?,?,?,1)
+    ON CONFLICT(scope,bucket) DO UPDATE SET
+      hits=CASE WHEN auth_rate_limits.expires_at<>excluded.expires_at THEN 1
+        WHEN auth_rate_limits.hits<? THEN auth_rate_limits.hits+1 ELSE auth_rate_limits.hits END,
+      expires_at=excluded.expires_at
+    RETURNING hits`, scope, hash(bucket), expiresAt, limit + 1);
+  return { allowed: (row?.hits ?? limit + 1) <= limit, retryAfter: Math.max(1, Math.ceil((expiresAt - timestamp) / 1000)) };
+}
+
+export async function authRate(request: NextRequest, scope: string) {
+  const source = request.headers.get('x-projectos-client-ip');
+  const proxyConfigured = process.env.PROJECTOS_TRUST_CLIENT_IP === 'enabled';
+  if (proxyConfigured && (!source || !isIP(source))) return { allowed: false, retryAfter: 60 };
+  const global = await rateLimit(scope + ':global', 'global', proxyConfigured ? 240 : 60, 60_000);
+  if (!global.allowed || !proxyConfigured) return global;
+  return rateLimit(scope + ':source', source!, 20, 60_000);
+}
+
+export async function newSession(userId: string, db?: SqlExecutor): Promise<string> {
+  if (!db) return transaction(connection => newSession(userId, connection));
+  if (!await accountByUser(userId, db)) throw new ForbiddenError();
+  const token = randomBytes(32).toString('base64url');
+  const now = Date.now();
+  await db.run('DELETE FROM sessions WHERE user_id=? AND (expires_at<=? OR last_seen_at<=?)',
+    userId, now, now - SESSION_IDLE_MS);
+  await db.run('INSERT INTO sessions(token_hash,user_id,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?)',
+    hash(token), userId, now, now + SESSION_SECONDS * 1000, now);
   return token;
 }
-export async function setSessionCookie(token:string) {
-  (await cookies()).set(COOKIE,token,{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'strict',path:'/',maxAge:SESSION_SECONDS});
+
+export async function setSessionCookie(token: string) {
+  (await cookies()).set(COOKIE, token, {
+    httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict',
+    path: '/', maxAge: SESSION_SECONDS,
+  });
 }
-/** Signed-in session lookup with absolute and idle expiry; throttled activity touch. */
-export function lookupSessionUserId(token:string):string|null {
-  if(!token||token.length>128)return null;
-  const now=Date.now(),tokenHash=hashed(token),db=getDb();
-  const row=db.prepare('SELECT user_id AS id,last_seen_at AS lastSeen FROM sessions WHERE token_hash=? AND expires_at>? AND last_seen_at>?')
-    .get(tokenHash,now,now-SESSION_IDLE_MS) as {id:string;lastSeen:number}|undefined;
-  if(!row)return null;
-  if(now-row.lastSeen>60_000)db.prepare('UPDATE sessions SET last_seen_at=? WHERE token_hash=? AND last_seen_at<?')
-    .run(now,tokenHash,now-60_000);
+
+export function readSessionToken() {
+  return cookies().then(jar => jar.get(COOKIE)?.value);
+}
+
+export async function lookupSessionUserId(token: string): Promise<string | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const now = Date.now();
+  const tokenHash = hash(token);
+  const row = await sql.one<{id: string; lastSeen: number}>(`SELECT s.user_id AS id,s.last_seen_at AS "lastSeen"
+    FROM sessions s JOIN memberships m ON m.user_id=s.user_id
+    WHERE s.token_hash=? AND s.expires_at>? AND s.last_seen_at>?`, tokenHash, now, now - SESSION_IDLE_MS);
+  if (!row) return null;
+  if (now - row.lastSeen > 60_000) await sql.run('UPDATE sessions SET last_seen_at=? WHERE token_hash=? AND last_seen_at<?',
+    now, tokenHash, now - 60_000);
   return row.id;
 }
-export async function getCurrentAccount():Promise<Account|null> {
-  const token=(await cookies()).get(COOKIE)?.value;
-  const userId=token?lookupSessionUserId(token):null;
-  return userId?accountByUser(userId):null;
+
+export async function getSessionAccount(): Promise<Account | null> {
+  const token = await readSessionToken();
+  const id = token ? await lookupSessionUserId(token) : null;
+  if (!id) return null;
+  const account = await accountByUser(id);
+  return account ? { ...account, displayName: redactCredentials(account.displayName) } : null;
 }
+
+export async function getCurrentAccount(): Promise<Account | null> {
+  const account = await getSessionAccount();
+  if (!account) return null;
+  if (requireMfa() && !await sql.one('SELECT id FROM users WHERE id=? AND mfa_seed IS NOT NULL', account.id)) return null;
+  return account;
+}
+
 export async function signOut() {
-  const jar=await cookies();
-  const token=jar.get(COOKIE)?.value;
-  if(token)getDb().prepare('DELETE FROM sessions WHERE token_hash=?').run(hashed(token));
-  jar.delete(COOKIE);
+  const jar = await cookies();
+  const token = jar.get(COOKIE)?.value;
+  if (token) await sql.run('DELETE FROM sessions WHERE token_hash=?', hash(token));
+  jar.set(COOKIE, '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/', maxAge: 0 });
 }
+
 export { userCount };
 
-/** Reject oversized request bodies *during* streaming, before buffering or parsing JSON. */
 export class RequestBodyTooLargeError extends Error {
-  constructor(){super('Request body exceeds allowed byte limit');}
+  constructor() { super('Request body exceeds allowed byte limit'); }
 }
-export async function readLimitedJson(request:NextRequest,maxBytes=4096):Promise<unknown> {
-  if(!Number.isSafeInteger(maxBytes)||maxBytes<1)throw new Error('Invalid body limit');
-  if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type')??''))throw Error('JSON content type required');
-  const length=request.headers.get('content-length');
-  if(length!==null){
-    if(!/^\d+$/.test(length)||!Number.isSafeInteger(Number(length)))throw Error('Invalid Content-Length');
-    if(Number(length)>maxBytes)throw new RequestBodyTooLargeError();
+
+export async function readJsonBytes(request: NextRequest, maxBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid body limit');
+  if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') ?? '')) throw new Error('JSON content type required');
+  const length = request.headers.get('content-length');
+  if (length !== null) {
+    if (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length))) throw new Error('Invalid Content-Length');
+    if (Number(length) > maxBytes) throw new RequestBodyTooLargeError();
   }
-  const reader=request.body?.getReader();
-  if(!reader)throw Error('Empty request body');
-  const parts:Uint8Array[]=[];
-  let consumed=0;
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error('Empty request body');
+  const parts: Buffer[] = [];
+  let consumed = 0;
   try {
-    while(true){
-      const {done,value}=await reader.read();
-      if(done)break;
-      consumed+=value.byteLength;
-      if(consumed>maxBytes){await reader.cancel('Body exceeds limit');throw new RequestBodyTooLargeError();}
-      parts.push(value);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      consumed += value.byteLength;
+      if (consumed > maxBytes) {
+        void reader.cancel('Body exceeds limit').catch(() => {});
+        throw new RequestBodyTooLargeError();
+      }
+      parts.push(Buffer.from(value));
     }
-  }finally{reader.releaseLock();}
-  return JSON.parse(Buffer.concat(parts.map(part=>Buffer.from(part)),consumed).toString('utf8'));
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(parts, consumed);
+}
+
+export async function readLimitedJson(request: NextRequest, maxBytes = 4096): Promise<unknown> {
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readJsonBytes(request, maxBytes)));
 }

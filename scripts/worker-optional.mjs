@@ -6,7 +6,8 @@ import {dirname,join} from 'node:path';
 const root=dirname(fileURLToPath(import.meta.url));
 const tasks=[
   ...(process.env.PROJECTOS_MONITOR_HOSTS?[['run-monitors.mjs', 'monitoring']]:[]),
-  ...(process.env.PROJECTOS_TELEGRAM_NOTIFICATIONS==='enabled'?[['deliver-notifications.mjs','telegram']]:[])
+  ...(process.env.PROJECTOS_TELEGRAM_NOTIFICATIONS==='enabled'||process.env.PROJECTOS_EMAIL_NOTIFICATIONS==='enabled'
+    ?[['deliver-notifications.mjs','notifications']]:[])
 ];
 let failures=0;
 for(const [script,name] of tasks){

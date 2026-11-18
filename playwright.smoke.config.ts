@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/functional.spec.ts',
+  testMatch: ['**/functional.spec.ts', '**/release.spec.ts'],
   fullyParallel: true,
   workers: 2,
   timeout: 90_000,

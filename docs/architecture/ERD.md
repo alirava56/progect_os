@@ -1,23 +1,27 @@
-# مدل دادهٔ اجراشده در Private Preview
-
-این نمودار ارتباط جدول‌های SQLite را نشان می‌دهد. ارجاع‌های داخل JSON با `parseState` کنترل می‌شوند. رابطهٔ `RECORDS.project_id` با پروژه و ارجاع `notification_outbox.reminder_id` کلید خارجی SQL ندارند.
+# ProjectOS implemented data model
 
 ```mermaid
 erDiagram
-  USERS ||--o{ MEMBERSHIPS : joins
+  USERS ||--o| MEMBERSHIPS : belongs
   WORKSPACES ||--o{ MEMBERSHIPS : grants
-  USERS ||--o{ SESSIONS : authenticates
+  MEMBERSHIPS ||--o{ SESSIONS : authenticates
   USERS ||--o{ MFA_RECOVERY_CODES : owns
-  USERS ||--o{ AUDIT_EVENTS : acts
   WORKSPACES ||--o{ WORKSPACE_INVITES : issues
-  WORKSPACES ||--o{ RECORDS : stores
-  WORKSPACES ||--o{ DOCUMENT_VERSIONS : versions
-  WORKSPACES ||--o{ AUDIT_EVENTS : logs
+  WORKSPACES ||--o{ RECORDS : contains
+  RECORDS ||--o{ RECORDS : project_scope
+  WORKSPACES ||--o{ DOCUMENT_VERSIONS : preserves
+  WORKSPACES ||--o{ AUDIT_EVENTS : records
   WORKSPACES ||--o{ NOTIFICATION_OUTBOX : queues
+  NOTIFICATION_OUTBOX ||--o| DELIVERY_RETRIES : leases
+  WORKSPACES ||--o{ VAULT_CHECKS : observes
+  WORKSPACES ||--o{ MONITOR_OBSERVATIONS : measures
+  WORKSPACES ||--o{ MACHINE_OBSERVATIONS : measures
+  WORKSPACES ||--o{ GITHUB_SNAPSHOTS : synchronizes
+  WORKSPACES ||--o{ GITHUB_DELIVERIES : deduplicates
 ```
 
-- کلید رکورد `(workspace_id, kind, id)` است. پروژه، تسک، منابع، حسابداری، یادآوری، ارجاع Vault و تنظیمات در payload همین جدول نگهداری می‌شوند.
-- نسخهٔ سراسری Workspace نوشتن قدیمی را رد می‌کند. Editor برای تغییر یک رکورد به همان نسخه وابسته است.
-- `document_versions` با `(workspace_id, document_id, revision)` تاریخچهٔ سند را جدا نگه می‌دارد.
-- `notification_outbox` وضعیت تحویل را برای کانال و موعد نگه می‌دارد. Worker تلگرام اطلاعات retry را جداگانه ثبت می‌کند.
-- PostgreSQL در Runtime فعال نیست. [پیش‌نویس مدل مقصد](POSTGRES-TARGET-DRAFT.sql).
+`records(workspace_id, kind, id)` holds one project, task, resource, document, Vault reference, reminder, incident, expense, charge, contract or revenue entry per row. Workspace preferences use the `preferences/singleton` row. The document history survives deletion. The write service prevents reusing old project and document IDs where earlier deletion was recorded. Membership grants are stored as a bounded list of project IDs with null denoting the entire Workspace. Applications must enforce both role and project scope before exposing a payload or a field.
+
+`record_version` is the revision at the last write. `record_tombstones` retains delete revisions. Combined with the workspace watermark it supports optimistic conflicts without losing independent edits. `sqlite_imports` records a source digest, table counts and import time. Authentication rate limits and worker heartbeats have dedicated tables.
+
+The SQL migrations show physical SQL constraints. Arrows above include logical relationships enforced by the repository, such as the link between delivery and retry lease. Secrets stored for authentication are encrypted TOTP provisioning state and one-way hashes. Vault record payloads contain locators and approved link metadata. [Runtime ADR](ADR-002-postgres-runtime.md)

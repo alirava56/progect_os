@@ -1,32 +1,65 @@
-/** Explicitly allowlisted, read-only GitHub repository overview. No token reaches the browser. */
-import {NextResponse} from 'next/server';
-import {getCurrentAccount} from '@/lib/server/auth';
-export const runtime='nodejs';
-export const dynamic='force-dynamic';
-export async function GET(){
-  const account=await getCurrentAccount();
-  if(!account)return NextResponse.json({error:'Unauthenticated'},{status:401});
-  if(account.role!=='owner')return NextResponse.json({error:'Forbidden'},{status:403});
-  const token=process.env.PROJECTOS_GITHUB_TOKEN;
-  const repos=(process.env.PROJECTOS_GITHUB_REPOS||'').split(',').map(x=>x.trim()).filter(Boolean);
-  if(!token||!repos.length)return NextResponse.json({status:'not_configured',repositories:[]},{headers:{'Cache-Control':'no-store'}});
-  if(repos.length>20||repos.some(x=>!/^[a-zA-Z0-9_.-]{1,100}\/[a-zA-Z0-9_.-]{1,100}$/.test(x))){
-    return NextResponse.json({error:'Invalid server repository allowlist'},{status:503});
-  }
-  const repositories=[];
-  for(const repo of repos){
-    try{
-      const [owner,name]=repo.split('/');
-      const response=await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,{
-        headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'ProjectOS/1.0'},
-        signal:AbortSignal.timeout(7000),cache:'no-store',redirect:'error'
-      });
-      if(!response.ok){repositories.push({repository:repo,state:'unknown'});continue;}
-      const json=await response.json();
-      repositories.push({repository:repo,state:'connected',fullName:String(json.full_name||repo),
-        private:Boolean(json.private),defaultBranch:String(json.default_branch||''),openIssues:Number(json.open_issues_count||0),
-        updatedAt:typeof json.pushed_at==='string'?json.pushed_at:null,url:`https://github.com/${repo}`});
-    }catch{repositories.push({repository:repo,state:'unknown'});}
-  }
-  return NextResponse.json({status:'configured',repositories},{headers:{'Cache-Control':'no-store'}});
+import { NextRequest, NextResponse } from 'next/server';
+import { checkOrigin, getCurrentAccount, rateLimit, readLimitedJson } from '@/lib/server/auth';
+import { projectPolicy, sql, storedRecord, type Account } from '@/lib/server/db';
+import { apiError, jsonError, noStore } from '@/lib/server/http';
+import { githubBindings, syncRepository, type RepositoryBinding, type RepositorySnapshot } from '@/lib/server/github';
+import { validRecordId } from '@/lib/record-contract';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function bindings(account: Account) {
+  return githubBindings().filter(binding => binding.workspaceId === account.workspaceId);
+}
+async function snapshot(binding: RepositoryBinding) {
+  const row = await sql.one<{status:string;payload:string}>(`SELECT status,payload FROM github_snapshots WHERE workspace_id=?
+    AND project_id=? AND repo=?`, binding.workspaceId, binding.projectId, binding.repository);
+  if (!row) return;
+  return {...JSON.parse(row.payload) as RepositorySnapshot, state:row.status as RepositorySnapshot['state']};
+}
+
+export async function GET() {
+  const account = await getCurrentAccount();
+  if (!account) return apiError('Unauthenticated', 401);
+  if (account.role !== 'owner') return apiError('Forbidden', 403);
+  await projectPolicy(sql, account);
+  const configured = bindings(account);
+  const repositories = await Promise.all(configured.map(async binding => {
+    if (!await storedRecord(sql, account.workspaceId, 'projects', binding.projectId)) return;
+    const latest = await snapshot(binding);
+    if (!latest) return {repository:binding.repository,projectId:binding.projectId,state:'unknown',checkedAt:null};
+    const age = Date.now() - Date.parse(latest.checkedAt);
+    const state = latest.state === 'connected' && (!Number.isFinite(age) || age < 0 || age > 15 * 60_000) ? 'stale' : latest.state;
+    return {...latest,projectId:binding.projectId,state};
+  }));
+  return NextResponse.json({ status:configured.length && process.env.PROJECTOS_GITHUB_TOKEN ? 'configured' : 'not_configured',
+    repositories:repositories.filter(Boolean) }, {headers:noStore});
+}
+
+export async function POST(request: NextRequest) {
+  if (!checkOrigin(request)) return apiError('Origin rejected', 403);
+  const account = await getCurrentAccount();
+  if (!account) return apiError('Unauthenticated', 401);
+  if (account.role !== 'owner') return apiError('Forbidden', 403);
+  await projectPolicy(sql, account);
+  const token = process.env.PROJECTOS_GITHUB_TOKEN;
+  if (!token) return apiError('GitHub is not configured', 503);
+  let input: unknown;
+  try { input = await readLimitedJson(request, 2048); }
+  catch (error) { return jsonError(error); }
+  const {projectId, repository} = (input ?? {}) as {projectId?:unknown; repository?:unknown};
+  if (!validRecordId(projectId) || typeof repository !== 'string') return apiError('Invalid repository mapping', 422);
+  const binding = bindings(account).find(row => row.projectId === projectId && row.repository === repository);
+  if (!binding || !await storedRecord(sql, account.workspaceId, 'projects', projectId)) return apiError('Not found', 404);
+  const limited = await rateLimit('github:sync', JSON.stringify([account.workspaceId,projectId,repository]), 5, 60_000);
+  if (!limited.allowed) return apiError('Try again later', 429, {'Retry-After':String(limited.retryAfter)});
+  const previous = await snapshot(binding);
+  if (previous?.retryAt && Date.parse(previous.retryAt) > Date.now()) return apiError('Rate limited by GitHub', 429,
+    {'Retry-After':String(Math.ceil((Date.parse(previous.retryAt) - Date.now())/1000))});
+  const next = await syncRepository(repository, token);
+  await sql.run(`INSERT INTO github_snapshots(workspace_id,project_id,repo,checked_at,status,payload) VALUES(?,?,?,?,?,?)
+    ON CONFLICT(workspace_id,project_id,repo) DO UPDATE SET checked_at=excluded.checked_at,status=excluded.status,payload=excluded.payload
+    WHERE github_snapshots.checked_at<=excluded.checked_at`,
+  account.workspaceId, projectId, repository, next.checkedAt, next.state, JSON.stringify(next));
+  return NextResponse.json({ ...next,projectId }, {headers:noStore});
 }

@@ -61,7 +61,7 @@ authenticated('strict revision conflict and invalid date are rejected',async({si
   const invalid=await signedIn.put('/api/state',{headers:origin,data:{version,data:{...data,tasks:[...data.tasks,task]}}});
   expect(invalid.status()).toBe(422);
 });
-authenticated('CSRF and unauthorized mutations fail closed',async({signedIn,origin,appURL})=>{
+authenticated('CSRF and unauthorized mutations fail closed',async({signedIn,appURL})=>{
   const current=await signedIn.get('/api/state');const payload=await current.json();
   const cross=await signedIn.put('/api/state',{headers:{Origin:'https://evil.example','Sec-Fetch-Site':'cross-site'},data:payload});
   expect(cross.status()).toBe(403);

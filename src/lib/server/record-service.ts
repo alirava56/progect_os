@@ -1,34 +1,159 @@
-/** Single-record API adapter. Validates the entire resulting state so cross-record relations remain sound. */
+import { isRecordKind, validRecordId, type RecordChange, type RecordKind, type WorkspaceRecord } from '../record-contract';
 import type { DemoData } from '../types';
-import { loadStateForRecordMutation, saveState, ForbiddenError, VersionConflictError, type Account } from './db';
-import { parseState, ValidationError } from './validation';
+import {
+  canSeeProject, ForbiddenError, lockWorkspace, persistChanges, projectOf, projectPolicy, storedRecord,
+  transaction, VersionConflictError, type Account, type PreparedChange, type RecordRow, type SqlExecutor,
+} from './db';
+import { parsePreferences, parseRecord, validateGraph, ValidationError } from './validation';
 
-export const RECORD_KINDS = ['projects','tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs'] as const;
-export type RecordKind = typeof RECORD_KINDS[number];
-export function isRecordKind(value:string):value is RecordKind {
-  return (RECORD_KINDS as readonly string[]).includes(value);
-}
 export class MissingRecordError extends Error {}
 export class DuplicateRecordError extends Error {}
-export function mutateRecord(account:Account, expectedVersion:number, kind:RecordKind, id:string, action:'create'|'replace'|'delete', input?:unknown) {
-  if(account.role!=='owner'&&!(account.role==='editor'&&['tasks','docs','reminders','incidents'].includes(kind)))throw new ForbiddenError();
-  if(!Number.isSafeInteger(expectedVersion)||expectedVersion<0)throw new ValidationError('Invalid revision');
-  if(id.length>100||!id||/[\/\\\u0000-\u001f]/.test(id))throw new ValidationError('Invalid record identifier');
-  const {data,version}=loadStateForRecordMutation(account);
-  if(version!==expectedVersion)throw new VersionConflictError();
-  const next=structuredClone(data) as DemoData;
-  const list=next[kind] as unknown as Array<{id:string}>;
-  const index=list.findIndex(item=>item.id===id);
-  if(action==='create'&&index!==-1)throw new DuplicateRecordError();
-  if(action!=='create'&&index===-1)throw new MissingRecordError();
-  if(action==='delete')list.splice(index,1);
-  else {
-    if(input===null||typeof input!=='object'||Array.isArray(input)||(input as {id?:unknown}).id!==id)
-      throw new ValidationError('Record id mismatch');
-    if(action==='create')list.push(input as {id:string});
-    else list[index]=input as {id:string};
+const editorKinds = new Set<RecordKind>(['tasks', 'docs', 'reminders', 'incidents']);
+
+function validateChange(input: unknown): RecordChange {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new ValidationError('Invalid record change');
+  const change = input as Partial<RecordChange>;
+  if (!isRecordKind(change.kind) || !validRecordId(change.id)
+    || (change.action !== 'create' && change.action !== 'replace' && change.action !== 'delete')
+    || Object.keys(input).some(key => !['kind', 'id', 'action', 'record'].includes(key))) {
+    throw new ValidationError('Invalid record change');
   }
-  // parseState checks all project relations, dates, uniqueness, cyclic dependencies and field allowlists.
-  const canonical=parseState(next);
-  return saveState(account,expectedVersion,canonical,account.role==='editor');
+  return { kind: change.kind, id: change.id, action: change.action, record: change.record };
+}
+
+function key(kind: RecordKind, id: string) { return kind + ':' + id; }
+function decode(row: RecordRow): WorkspaceRecord { return JSON.parse(row.payload) as WorkspaceRecord; }
+
+async function validateRelations(db: SqlExecutor, workspaceId: string, changes: Map<string, PreparedChange>) {
+  const exists = async (kind: RecordKind, id: string) => {
+    const draft = changes.get(key(kind, id));
+    return draft ? Boolean(draft.record) : Boolean(await storedRecord(db, workspaceId, kind, id));
+  };
+  const updates = [...changes.values()];
+  for (const {kind, record} of updates) {
+    if (!record || kind === 'projects') continue;
+    const project = projectOf(kind, record);
+    if (!project || !await exists('projects', project)) throw new ValidationError('Unknown project');
+  }
+
+  const removedProjects = new Set(updates.filter(change => change.kind === 'projects' && !change.record).map(change => change.id));
+  for (const projectId of removedProjects) {
+    const children = await db.all<RecordRow>(`SELECT kind,id,project_id,payload,record_version FROM records
+      WHERE workspace_id=? AND project_id=? AND kind<>'projects'`, workspaceId, projectId);
+    for (const row of children) {
+      const draft = changes.get(key(row.kind as RecordKind, row.id));
+      if (!draft || (draft.record && projectOf(draft.kind, draft.record) === projectId)) {
+        throw new ValidationError('Project still has records');
+      }
+    }
+  }
+
+  async function graphRows<Kind extends 'tasks' | 'resources' | 'charges'>(kind: Kind) {
+    const rows = await db.all<RecordRow>('SELECT kind,id,project_id,payload,record_version FROM records WHERE workspace_id=? AND kind=?',
+      workspaceId, kind);
+    type Item = DemoData[Kind][number];
+    const effective = new Map<string, Item>(rows.map(row => [row.id, decode(row) as Item]));
+    for (const draft of updates) {
+      if (draft.kind !== kind) continue;
+      if (draft.record) effective.set(draft.id, draft.record as Item);
+      else effective.delete(draft.id);
+    }
+    return effective;
+  }
+  if (updates.some(change => change.kind === 'tasks')) {
+    const tasks = await graphRows('tasks');
+    validateGraph(new Map([...tasks].map(([id, task]) => [id, task.dependencies])), 'task dependencies');
+  }
+
+  if (updates.some(change => change.kind === 'resources' || change.kind === 'charges') || removedProjects.size) {
+    const resources = await graphRows('resources');
+    validateGraph(new Map([...resources].map(([id, resource]) => [id, resource.parentId ? [resource.parentId] : []])), 'resource parents');
+    for (const resource of resources.values()) {
+      if (resource.linkedProjectIds?.some(id => removedProjects.has(id))) throw new ValidationError('Project still has shared resources');
+    }
+    for (const change of updates) {
+      if (change.kind !== 'resources' || !change.record) continue;
+      const resource = change.record as DemoData['resources'][number];
+      for (const id of resource.linkedProjectIds ?? []) {
+        if (!await exists('projects', id)) throw new ValidationError('Invalid shared resource project');
+      }
+    }
+    const charges = await graphRows('charges');
+    for (const charge of charges.values()) {
+      if (charge.linkedResourceId && !resources.has(charge.linkedResourceId)) {
+        throw new ValidationError('Invalid charge resource reference');
+      }
+    }
+  }
+}
+
+export async function commitRecordChanges(
+  account: Account, expectedVersion: number, input: unknown, preferences?: unknown, strictWorkspaceVersion = false,
+) {
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) throw new ValidationError('Invalid revision');
+  if (!Array.isArray(input) || input.length > 100 || (!input.length && preferences === undefined)) {
+    throw new ValidationError('Expected up to 100 record changes');
+  }
+  if (account.role === 'viewer' || (preferences !== undefined && account.role !== 'owner')) throw new ForbiddenError();
+  const changes = input.map(validateChange);
+  const settings = preferences === undefined ? undefined : parsePreferences(preferences);
+  return transaction(async db => {
+    const workspace = await lockWorkspace(db, account.workspaceId);
+    if (!workspace) throw new ForbiddenError();
+    const policy = await projectPolicy(db, account);
+    if (expectedVersion > workspace.version || (strictWorkspaceVersion && workspace.version !== expectedVersion)) {
+      throw new VersionConflictError();
+    }
+    if (settings) {
+      const existing = await storedRecord(db, account.workspaceId, 'preferences', 'singleton');
+      if (existing && existing.record_version > expectedVersion) throw new VersionConflictError();
+    }
+
+    const prepared = new Map<string, PreparedChange>();
+    for (const change of changes) {
+      const { kind, id, action } = change;
+      if (account.role === 'editor' && !editorKinds.has(kind)) throw new ForbiddenError();
+      const keyForRecord = key(kind, id);
+      if (prepared.has(keyForRecord)) throw new ValidationError('Duplicate change in transaction');
+      const previous = await storedRecord(db, account.workspaceId, kind, id);
+      if (previous && !canSeeProject(policy, previous.project_id)) throw new MissingRecordError();
+      if (action === 'create' && previous) throw new DuplicateRecordError();
+      if (action !== 'create' && !previous) throw new MissingRecordError();
+      if (previous && previous.record_version > expectedVersion) throw new VersionConflictError();
+      if (!previous) {
+        const tombstone = await db.one<{record_version: number}>('SELECT record_version FROM record_tombstones WHERE workspace_id=? AND kind=? AND id=?',
+          account.workspaceId, kind, id);
+        if (tombstone && tombstone.record_version > expectedVersion) throw new VersionConflictError();
+      }
+      const record = action === 'delete' ? undefined : parseRecord(kind, change.record);
+      if (record && record.id !== id) throw new ValidationError('Record id mismatch');
+      if (record && !canSeeProject(policy, projectOf(kind, record))) throw new ForbiddenError();
+      // Legacy same-workspace cross-project dependencies may be hidden from this editor.
+      // Keep those edges intact and reject any new dependency outside the editor's grant.
+      if (record && kind === 'tasks' && policy.projectIds !== null) {
+        const task = record as DemoData['tasks'][number];
+        const old = previous ? decode(previous) as DemoData['tasks'][number] : undefined;
+        const hidden: string[] = [];
+        for (const id of old?.dependencies ?? []) {
+          const row = await storedRecord(db, account.workspaceId, 'tasks', id);
+          if (row && !canSeeProject(policy, row.project_id)) hidden.push(id);
+        }
+        for (const id of task.dependencies) {
+          const row = await storedRecord(db, account.workspaceId, 'tasks', id);
+          if (row && !canSeeProject(policy, row.project_id)) throw new ValidationError('Invalid task dependency');
+        }
+        task.dependencies = [...task.dependencies, ...hidden];
+      }
+      prepared.set(keyForRecord, { kind, id, previous, record });
+    }
+    await validateRelations(db, account.workspaceId, prepared);
+    const version = workspace.version + 1;
+    await persistChanges(db, account, version, [...prepared.values()], settings);
+    return version;
+  });
+}
+
+export function mutateRecord(account: Account, expectedVersion: number, kind: RecordKind, id: string,
+  action: RecordChange['action'], record?: unknown, strictWorkspaceVersion = true) {
+  return commitRecordChanges(account, expectedVersion, [{kind, id, action, record}], undefined, strictWorkspaceVersion);
 }

@@ -1,5 +1,6 @@
 'use client';
 import {useRouter} from 'next/navigation';
+import Link from 'next/link';
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { Download, KeyRound, Mail, Pencil, Plug2, Plus, ShieldCheck, UserRound, Users } from 'lucide-react';
@@ -12,7 +13,19 @@ export function Integrations() {
   const { data } = useDemo();
   const [selected,setSelected] = useState<Integration>();
   const [catalog,setCatalog] = useState(false);
-  const [github,setGithub]=useState<{status:string;repositories:Array<{repository:string;state:string;openIssues?:number;updatedAt?:string|null}>}|null>(null);
+  const [github,setGithub]=useState<{status:string;repositories:Array<{repository:string;projectId:string;state:string;openIssues?:number;checkedAt?:string|null;latestDeployment?:{state:string}|null}>}|null>(null);
+  const [syncing,setSyncing]=useState(false);
+  const [syncMessage,setSyncMessage]=useState('');
+  async function sync(repository:string,projectId:string){
+    setSyncing(true);setSyncMessage('');
+    try{
+      const result=await fetch('/api/integrations/github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repository,projectId})});
+      if(!result.ok)throw new Error(result.status===429?'محدودیت نرخ GitHub. پس از وقفهٔ اعلام‌شده دوباره تلاش کنید.':'همگام‌سازی در دسترس نیست.');
+      const current=await result.json();
+      setGithub(value=>value?{...value,repositories:value.repositories.map(repo=>repo.projectId===projectId&&repo.repository===repository?current:repo)}:value);
+    }catch(error){setSyncMessage(error instanceof Error?error.message:'همگام‌سازی در دسترس نیست.');}
+    finally{setSyncing(false);}
+  }
   useEffect(()=>{
     let active=true;
     fetch('/api/integrations/github',{cache:'no-store'}).then(r=>r.ok?r.json():null)
@@ -29,9 +42,11 @@ export function Integrations() {
         <h2><bdi>{i.name}</bdi></h2><p className="muted">{i.description}</p>
         <div className="integration-end"><Button onClick={() => setSelected(i)} icon={Plug2}>جزئیات اتصال</Button><small className="muted" dir="ltr">{i.protocol}</small></div>
       </Panel>)}</div>
-      {github?.repositories?.length? <Panel title="GitHub · آخرین بررسی API">{github.repositories.map(repo=><Row key={repo.repository} icon={Plug2} title={<bdi dir="ltr">{repo.repository}</bdi>}
-        meta={repo.state==='connected'?`Issueهای باز: ${repo.openIssues??0} · آخرین Push: ${repo.updatedAt||'نامشخص'}`:'وضعیت نامشخص · ارتباط ناموفق'}
-        end={<Pill tone={repo.state==='connected'?'good':'warn'}>{repo.state==='connected'?'دریافت موفق':'نامشخص'}</Pill>} />)}</Panel>:null}
+      {github?.repositories?.length? <Panel title="GitHub · آخرین بررسی API">{github.repositories.map(repo=><Row key={repo.projectId+':'+repo.repository} icon={Plug2} title={<bdi dir="ltr">{repo.repository}</bdi>}
+        meta={repo.state==='connected'?`اقلام باز: ${repo.openIssues??'نامشخص'} · بررسی: ${repo.checkedAt?new Date(repo.checkedAt).toLocaleString('fa-IR'):'نامشخص'} · استقرار: ${repo.latestDeployment?.state??'نامشخص'}`:'وضعیت فعلی نامشخص'}
+        end={<div className="control-group"><Pill tone={repo.state==='connected'?'good':'warn'}>{repo.state==='connected'?'دریافت موفق':'نامشخص'}</Pill>
+          <Button disabled={syncing||github.status!=='configured'} onClick={()=>void sync(repo.repository,repo.projectId)}>همگام‌سازی</Button></div>} />)}
+          {syncMessage&&<p role="status">{syncMessage}</p>}</Panel>:null}
       <Callout>اتصال خواندنی GitHub فقط پس از تنظیم توکن و فهرست مخازن مجاز روی سرور کار می‌کند. سایر اتصال‌ها فعال نیستند؛ توکن را داخل فرم‌های برنامه وارد نکنید.</Callout>
     </div>
     {catalog && <Modal title="فهرست اتصال‌ها" onClose={() => setCatalog(false)}>
@@ -50,6 +65,8 @@ export function Team() {
   const {data}=useDemo();
   const owner=data.users[0]?.role==='Owner';
   const [email,setEmail]=useState(''),[role,setRole]=useState<'viewer'|'editor'>('viewer');
+  const [limited,setLimited]=useState(true);
+  const [projectIds,setProjectIds]=useState<string[]>([]);
   const [token,setToken]=useState(''),[invites,setInvites]=useState<Array<{id:string;email:string;role:string;expiresAt:number;redeemedAt:number|null;revokedAt:number|null;active:boolean}>>([]);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   async function refresh(){
@@ -61,7 +78,7 @@ export function Team() {
   async function invite(event:FormEvent<HTMLFormElement>){
     event.preventDefault();setBusy(true);setMessage('');setToken('');
     try{
-      const res=await fetch('/api/team/invitations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,role})});
+      const res=await fetch('/api/team/invitations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,role,projectIds:limited ? projectIds : null})});
       if(!res.ok)throw Error('دعوت پذیرفته نشد؛ ایمیل یا محدودیت دعوت‌ها را بررسی کن.');
       const value=await res.json();setToken(value.token);setEmail('');await refresh();
       setMessage('دعوت ایجاد شد. کد را فقط از یک کانال خصوصی با فرد موردنظر به اشتراک بگذار.');
@@ -99,7 +116,14 @@ export function Team() {
         <form className="form-stack" onSubmit={invite}>
           <Field label="ایمیل عضو جدید"><input type="email" dir="ltr" required value={email} onChange={e=>setEmail(e.target.value)} /></Field>
           <Field label="سطح دسترسی"><select value={role} onChange={e=>setRole(e.target.value as 'viewer'|'editor')}><option value="viewer">Viewer · مشاهده</option><option value="editor">Developer · ویرایش کارها و اسناد</option></select></Field>
-          <Button disabled={busy||!email} type="submit" icon={Plus}>ایجاد کد دعوت یک‌بارمصرف</Button>
+          <Field label="دامنهٔ پروژه‌ها"><select value={limited?'limited':'workspace'} onChange={e=>setLimited(e.target.value==='limited')}>
+            <option value="limited">پروژه‌های انتخاب‌شده</option><option value="workspace">همهٔ پروژه‌های فضای کاری</option>
+          </select></Field>
+          {limited&&<Field label="پروژه‌های مجاز"><select multiple value={projectIds}
+            onChange={e=>setProjectIds(Array.from(e.currentTarget.selectedOptions, option=>option.value))}>
+            {data.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select></Field>}
+          <Button disabled={busy||!email||(limited&&!projectIds.length)} type="submit" icon={Plus}>ایجاد کد دعوت یک‌بارمصرف</Button>
         </form>
         {token&&<div className="form-stack"><Callout>کد زیر تنها همین یک بار نمایش داده می‌شود. گیرنده باید آدرس /join را باز و کد را در فرم وارد کند. آن را در مستندات ProjectOS ذخیره نکن.</Callout><p dir="ltr" className="font-mono break-all select-text">{token}</p><Button onClick={()=>setToken('')}>کد را ذخیره کردم؛ پنهان کن</Button></div>}
         {invites.filter(i=>i.active).map(i=><Row key={i.id} icon={Mail} title={<bdi dir="ltr">{i.email}</bdi>} meta={`نقش: ${i.role} · انقضا: ${new Date(i.expiresAt).toLocaleString('fa-IR')}`} end={<Button disabled={busy} onClick={()=>revoke(i.id)}>ابطال</Button>}/>)}
@@ -172,8 +196,8 @@ function PreferencesForm({ preferences }: { preferences: Preferences }) {
   </>;
 }
 
-function MfaSettings(){
-  const [status,setStatus]=useState<'unknown'|'enabled'|'disabled'>('unknown');
+export function MfaSettings({enrollmentRequired=false, initiallyEnabled=false}: {enrollmentRequired?:boolean; initiallyEnabled?:boolean} = {}){
+  const [status,setStatus]=useState<'unknown'|'enabled'|'disabled'>(initiallyEnabled ? 'enabled' : enrollmentRequired ? 'disabled' : 'unknown');
   const [enroll,setEnroll]=useState<{secret:string;provisioningUrl:string}|null>(null);
   const [recoveryCodes,setRecoveryCodes]=useState<string[]>([]);
   const [remaining,setRemaining]=useState<number|null>(null);
@@ -192,9 +216,9 @@ function MfaSettings(){
     setBusy(true);setMessage('');
     try{
       const response=await fetch('/api/auth/mfa',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({action:'start',password})});
+        body:JSON.stringify({action:'start',password,code})});
       if(!response.ok)throw Error('برای فعال‌سازی، رمز فعلی و کلید رمزنگاری سمت سرور باید معتبر باشند.');
-      setEnroll(await response.json());setPassword('');
+      setEnroll(await response.json());setPassword('');setCode('');
     }catch(e){setMessage(e instanceof Error?e.message:'خطای فعال‌سازی');}finally{setBusy(false);}
   }
   async function confirm(){
@@ -230,17 +254,19 @@ function MfaSettings(){
       <Field label="کد شش‌رقمی برنامه Authenticator"><input type="text" value={code} inputMode="numeric" pattern="[0-9]{6}" maxLength={6} onChange={e=>setCode(e.target.value)} dir="ltr" autoComplete="one-time-code" /></Field>
       <Button onClick={confirm} disabled={busy||!/^\d{6}$/.test(code)}>تأیید و فعال‌سازی</Button>
     </div>}
-    {status==='enabled'&&remaining!==null&&!recoveryCodes.length&&<div className="form-stack">
+    {status==='enabled'&&remaining!==null&&!enroll&&!recoveryCodes.length&&!enrollmentRequired&&<div className="form-stack">
       <p className="muted">تعداد کدهای بازیابی باقی‌مانده: {remaining}</p>
       <Field label="رمز فعلی برای صدور مجدد کدهای بازیابی"><input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></Field>
       <Field label="کد دومرحله‌ای تازه"><input type="text" dir="ltr" maxLength={6} inputMode="numeric" value={code} onChange={e=>setCode(e.target.value)} /></Field>
       <Button disabled={busy||!password||!/^[0-9]{6}$/.test(code)} onClick={rotateRecovery}>ابطال کدهای قدیمی و صدور کدهای جدید</Button>
+      {!enrollmentRequired&&<Button disabled={busy||!password||!/^[0-9]{6}$/.test(code)} onClick={start}>ثبت عامل دوم جدید</Button>}
     </div>}
     {!!recoveryCodes.length&&<div className="form-stack">
       <Callout>این کدها فقط همین یک‌بار نمایش داده می‌شوند و هر کد فقط یک بار کار می‌کند. آن‌ها را در Password Manager ذخیره کن و داخل مستندات ProjectOS وارد نکن.</Callout>
       <pre dir="ltr" className="font-mono whitespace-pre-wrap break-all select-text">{recoveryCodes.join('\n')}</pre>
       <Button onClick={()=>setRecoveryCodes([])}>کدها را در محل امن ذخیره کردم؛ پنهان کن</Button>
     </div>}
+    {enrollmentRequired&&status==='enabled'&&!recoveryCodes.length&&<Link href="/dashboard">ورود به فضای کاری</Link>}
     {message&&<p role="status" className="muted">{message}</p>}
   </div>;
 }

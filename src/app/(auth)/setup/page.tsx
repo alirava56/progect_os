@@ -4,6 +4,6 @@ import { redirect } from 'next/navigation';
 export const metadata={title:'راه‌اندازی مالک اولیه'};
 export default async function Page(){
   if(await getCurrentAccount())redirect('/dashboard');
-  if(userCount()>0)redirect('/login');
+  if(await userCount()>0)redirect('/login');
   return <Setup />;
 }

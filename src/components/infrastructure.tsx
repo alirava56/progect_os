@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArchiveRestore, CircleAlert, Clock3, Cpu, Database, FileText, Globe2, HardDrive, KeyRound, MemoryStick, Network, Pencil, Plus, Server, ShieldCheck } from 'lucide-react';
@@ -107,6 +107,43 @@ export function Infrastructure() {
   </>;
 }
 
+function VaultMetadata({reference}:{reference:SecretReference}){
+  const [status,setStatus]=useState<{status:string;checkedAt:string|null}>({status:'unknown',checkedAt:null});
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const route='/api/vault/'+encodeURIComponent(reference.id);
+  useEffect(()=>{
+    const controller=new AbortController();
+    fetch(route,{cache:'no-store',signal:controller.signal}).then(async response=>{
+      if(response.ok)setStatus(await response.json());
+      else setError('وضعیت ارجاع در دسترس نیست.');
+    }).catch(()=>{if(!controller.signal.aborted)setError('وضعیت ارجاع در دسترس نیست.');});
+    return ()=>controller.abort();
+  },[route]);
+  async function verify(event:FormEvent<HTMLFormElement>){
+    const form=event.currentTarget;
+    const get=formValues(event);
+    setBusy(true);setError('');
+    try{
+      const response=await fetch(route,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:get('password'),totp:get('totp')})});
+      if(!response.ok)throw new Error('بررسی انجام نشد. رمز و کد ورود را بررسی کنید.');
+      setStatus(await response.json());
+    }catch(error){setError(error instanceof Error?error.message:'بررسی انجام نشد.');}
+    finally{setBusy(false);form.reset();}
+  }
+  const labels:Record<string,string>={verified:'فراداده تأیید شد',not_configured:'اتصال تنظیم نشده',unknown:'نامشخص',stale:'بررسی قدیمی',not_found:'فراداده پیدا نشد'};
+  return <div className="stack">
+    <p role="status">{labels[status.status]??'نامشخص'}{status.checkedAt?' · '+dateLabel(status.checkedAt,{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}):''}</p>
+    {reference.vaultMount&&<form className="form-stack" onSubmit={verify}>
+      <Field label="رمز حساب برای بررسی"><input type="password" name="password" autoComplete="current-password" required /></Field>
+      <Field label="کد تازهٔ MFA"><input type="text" name="totp" maxLength={6} inputMode="numeric" autoComplete="one-time-code" /></Field>
+      <Button type="submit" disabled={busy}>بررسی فراداده در Vault</Button>
+    </form>}
+    {error&&<p role="alert">{error}</p>}
+  </div>;
+}
+
 export function ServerDetails({ id }: { id: string }) {
   const { data } = useDemo();
   const [editing, setEditing] = useState(false);
@@ -158,7 +195,12 @@ function SecretForm({ onClose, projectId }: { onClose: () => void; projectId: st
   function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('name') || !get('provider')) { notice('نام ارجاع و محل خزانه را وارد کنید.'); return; }
-    const item: SecretReference = {id:newId('reference'),name:get('name'),projectId:get('project'),type:get('type') as SecretReference['type'],vaultProvider:get('provider'),...(get('link')?{externalRef:get('link')}:{})};
+    const item: SecretReference = {
+      id:newId('reference'),name:get('name'),projectId:get('project'),type:get('type') as SecretReference['type'],
+      vaultProvider:get('provider'),...(get('link')?{externalRef:get('link')}:{}),
+      ...(get('mount')||get('path')?{vaultMount:get('mount'),vaultPath:get('path')}:{}),
+      ...(get('rotation')?{rotationDue:get('rotation')}:{}),
+    };
     change(data => ({ ...data,secrets:[...data.secrets,item] }), 'فرادادهٔ ارجاع ثبت شد.');
     onClose();
   }
@@ -170,6 +212,11 @@ function SecretForm({ onClose, projectId }: { onClose: () => void; projectId: st
     <Field label="محل خزانه"><input name="provider" placeholder="1Password / Bitwarden / Infisical" required dir="auto" maxLength={80} /></Field>
     <Field label="لینک امن آیتم خزانه (اختیاری)"><input name="link" type="url" dir="ltr" maxLength={500} placeholder="https://start.1password.com/open/..." /></Field>
     <Callout>فقط لینک‌های HTTPS به دامنه‌های رسمی 1Password، Bitwarden یا Infisical پذیرفته می‌شوند. لینک نباید حاوی رمز یا توکن باشد.</Callout>
+    <div className="form-grid">
+      <Field label="Mount فراداده برای HashiCorp Vault"><input name="mount" dir="ltr" maxLength={80} /></Field>
+      <Field label="مسیر فراداده برای HashiCorp Vault"><input name="path" dir="ltr" maxLength={240} /></Field>
+      <Field label="موعد چرخش"><input name="rotation" type="date" dir="ltr" /></Field>
+    </div>
     <FormActions onClose={onClose} submit="ثبت ارجاع" />
   </form></Modal>;
 }
@@ -180,6 +227,7 @@ export function Vault() {
   const [type,setType] = useState('');
   const [show,setShow] = useState(false);
   const [selected,setSelected] = useState<SecretReference>();
+  if(data.users[0]?.role!=='Owner')return <Panel title="خزانه دسترسی‌ها"><Callout>مشاهدهٔ ارجاع‌ها نیازمند نقش مالک است.</Callout></Panel>;
   const scope = data.secrets.filter(s => !projectScope || s.projectId === projectScope);
   const items = scope.filter(s => (!type || s.type === type) && matches(query,s.name,s.vaultProvider));
   return <>
@@ -187,7 +235,7 @@ export function Vault() {
       <Button variant="primary" icon={Plus} onClick={() => setShow(true)}>افزودن ارجاع</Button>
     </Heading>
     <div className="stack">
-      <Callout><strong>خزانه متصل نیست.</strong> این صفحه محل نگهداری و نوع رکورد را نشان می‌دهد. مشاهده و کپی مقدار محرمانه در دسترس نیست.</Callout>
+      <Callout>وضعیت بررسی فراداده را در جزئیات هر ارجاع ببینید. مشاهدهٔ مقدار محرمانه در خود Vault انجام می‌شود.</Callout>
       <Metrics entries={[
         {label:'مراجع امن',value:scope.length,note:'فرادادهٔ ثبت‌شده',icon:ShieldCheck},
         {label:'کلیدهای SSH',value:scope.filter(s => s.type === 'SSH Key').length,note:'ارجاع دسترسی سرورها',icon:KeyRound},
@@ -204,7 +252,7 @@ export function Vault() {
           {label:'نوع',render:s => <bdi dir="ltr">{s.type}</bdi>},
           {label:'محل ارجاع',render:s => <bdi dir="ltr">{s.vaultProvider}</bdi>},
           {label:'آخرین بررسی',extra:true,render:s => s.lastCheckedAt ? `${dateLabel(s.lastCheckedAt)} · ثبت دستی` : 'نامشخص'},
-          {label:'دسترسی',extra:true,render:() => <Pill tone="neutral">متصل نیست</Pill>},
+          {label:'مسیر بررسی',extra:true,render:s => s.vaultMount ? 'فرادادهٔ HashiCorp' : 'ارجاع بیرونی'},
         ]} />
       </Panel>
       <Panel title="قوانین دسترسی"><div className="grid-3">
@@ -214,9 +262,8 @@ export function Vault() {
     {show && <SecretForm projectId={projectScope} onClose={() => setShow(false)} />}
     {selected && <Modal title="جزئیات ارجاع" onClose={() => setSelected(undefined)}><div className="form-stack">
       <Row title={<bdi>{selected.name}</bdi>} meta={<bdi dir="ltr">{selected.type} · {selected.vaultProvider}</bdi>} icon={KeyRound} />
-      <div className="flex items-center justify-between"><span className="mono" aria-label="مقدار در دسترس نیست">••••••••</span><Pill tone="neutral">متصل نیست</Pill></div>
+      <VaultMetadata key={selected.id} reference={selected} />
       {selected.externalRef&&vaultLink(selected.externalRef) ? <a href={vaultLink(selected.externalRef)!} target="_blank" rel="noopener noreferrer" className="cell-link">باز کردن آیتم در خزانه خارجی (احراز هویت توسط خزانه)</a> : null}
-      <Callout>ProjectOS صرفاً لینک یا اطلاعات رکورد را ثبت می‌کند و به رمز واقعی دسترسی ندارد. هیچ وضعیت اتصال به Vault در این صفحه تأیید نشده است.</Callout>
     </div></Modal>}
   </>;
 }

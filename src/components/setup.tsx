@@ -11,8 +11,7 @@ export function Setup(){
     try {
       const response=await fetch('/api/auth/setup',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});
       if(!response.ok)throw new Error('توکن راه‌اندازی یا اطلاعات حساب معتبر نیست، یا قبلاً حساب ساخته شده است.');
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign('/onboarding');
+      window.location.assign((await response.json()).enrollmentRequired ? '/mfa-enroll' : '/onboarding');
     }catch(err){setError(err instanceof Error?err.message:'امکان ایجاد حساب وجود ندارد.');setBusy(false);}
   }
   return <main className="auth-layout"><div className="auth-form"><div className="auth-form-inner"><Mark />

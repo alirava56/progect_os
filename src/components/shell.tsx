@@ -47,7 +47,7 @@ export function Mark({ className = '' }: { className?: string }) {
   return <span className={`brand-mark ${className}`} aria-hidden="true"><Layers2 /></span>;
 }
 export function Brand() {
-  return <Link className="brand" href="/dashboard" aria-label="داشبورد ProjectOS">
+  return <Link className="brand" href="/dashboard">
     <Mark /><span dir="ltr"><strong>Project<span>OS</span></strong><small>Developer Command Center</small></span>
   </Link>;
 }
@@ -123,7 +123,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
         <div className="top-tools">
           <button className="top-search" type="button" onClick={() => setOverlay('search')} aria-label="جست‌وجوی فضای کاری">
-            <Search size={16} aria-hidden="true" /><span>جست‌وجو در فضای کاری</span><kbd dir="ltr">Ctrl K</kbd>
+            <Search size={16} aria-hidden="true" /><span>جست‌وجوی فضای کاری</span><kbd dir="ltr" aria-hidden="true">Ctrl K</kbd>
           </button>
           <IconButton icon={Plus} label="افزودن سریع" onClick={() => setOverlay('quick')} />
           <IconButton icon={Bell} className={openAlerts.length ? 'has-alerts' : ''} label="اعلان‌ها" onClick={() => setOverlay('notifications')} />

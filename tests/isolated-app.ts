@@ -7,8 +7,9 @@ import { test as playwright } from '@playwright/test';
 export const setupToken = 'this-is-a-public-test-only-token-not-a-secret';
 export type Origin = { Origin: string; 'Sec-Fetch-Site': 'same-origin' };
 
-export const test = playwright.extend<{ appURL: string; origin: Origin }>({
-  appURL: async ({}, use) => {
+export const test = playwright.extend<{ appURL: string; origin: Origin; enforceMfa: boolean }>({
+  enforceMfa: [false, { option:true }],
+  appURL: async ({enforceMfa}, provide) => {
     const dir = await mkdtemp(join(tmpdir(), 'projectos-smoke-'));
     const server = fork(resolve('scripts/prepare-e2e.mjs'), [], {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -17,7 +18,7 @@ export const test = playwright.extend<{ appURL: string; origin: Origin }>({
         NODE_ENV: 'production',
         PROJECTOS_DB_PATH: join(dir, 'smoke.sqlite'),
         PROJECTOS_DATABASE_URL: '',
-        PROJECTOS_REQUIRE_MFA: 'disabled',
+        PROJECTOS_REQUIRE_MFA: enforceMfa ? 'enabled' : 'disabled',
         PROJECTOS_SETUP_TOKEN: setupToken,
         PROJECTOS_MFA_ENCRYPTION_KEY: '35'.repeat(32),
         PROJECTOS_GITHUB_TOKEN: '',
@@ -50,13 +51,13 @@ export const test = playwright.extend<{ appURL: string; origin: Origin }>({
           fail(new Error(`Test server exited (${code})\n${logs}`));
         });
       });
-      await use(url);
+      await provide(url);
     } finally {
       server.kill();
       await exited;
       await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   },
-  baseURL: async ({ appURL }, use) => { await use(appURL); },
-  origin: async ({ appURL }, use) => { await use({ Origin: appURL, 'Sec-Fetch-Site': 'same-origin' }); },
+  baseURL: async ({ appURL }, provide) => { await provide(appURL); },
+  origin: async ({ appURL }, provide) => { await provide({ Origin: appURL, 'Sec-Fetch-Site': 'same-origin' }); },
 });

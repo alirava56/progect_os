@@ -161,3 +161,7 @@
 @media(max-width: 523px) {
   .table-scroll-hint { display: flex; align-items: center; gap: 6px; padding-block: 2px 5px; color: var(--text-muted); font-size: 10.5px; }
 }
+.auth-form-inner p a {
+  text-decoration: underline;
+  text-underline-offset: .18em;
+}

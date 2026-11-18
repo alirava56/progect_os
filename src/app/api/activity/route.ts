@@ -10,7 +10,7 @@ export async function POST(request:NextRequest){
   if(!checkOrigin(request))return NextResponse.json({error:'Forbidden'},{status:403,headers});
   try{
     const payload=await readLimitedJson(request,2048);
-    appendManualActivity(user,payload);
+    await appendManualActivity(user,payload);
     return NextResponse.json({ok:true},{headers});
   }catch(error){
     if(error instanceof RequestBodyTooLargeError)return NextResponse.json({error:'Payload too large'},{status:413,headers});

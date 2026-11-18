@@ -21,8 +21,7 @@ export function Login() {
     try{
       const response=await fetch('/api/auth/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});
       if(!response.ok)throw new Error('ایمیل یا رمز معتبر نیست، یا حساب موقتاً قفل شده است.');
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign('/dashboard');
+      window.location.assign((await response.json()).enrollmentRequired ? '/mfa-enroll' : '/dashboard');
     }catch(e){setError(e instanceof Error?e.message:'خطای ارتباطی');setBusy(false);}
   }
   return <main className="auth-layout"><div className="auth-form"><div className="auth-form-inner">

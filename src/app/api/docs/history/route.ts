@@ -1,16 +1,33 @@
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { validRecordId } from '@/lib/record-contract';
+import type { Doc } from '@/lib/types';
 import { getCurrentAccount } from '@/lib/server/auth';
-import { getDb } from '@/lib/server/db';
-import {redactStoredValue} from '@/lib/server/credential-guard';
-export const runtime='nodejs';
-export async function GET(request:NextRequest){
-  const account=await getCurrentAccount();
-  if(!account)return NextResponse.json({error:'Unauthorized'},{status:401});
-  const id=request.nextUrl.searchParams.get('id');
-  if(!id||id.length>100)return NextResponse.json({error:'Invalid document id'},{status:400});
-  const db=getDb();
-  const doc=db.prepare('SELECT id FROM records WHERE workspace_id=? AND kind=? AND id=?').get(account.workspaceId,'docs',id);
-  if(!doc)return NextResponse.json({error:'Not found'},{status:404});
-  const revisions=db.prepare('SELECT revision,payload,saved_at AS savedAt FROM document_versions WHERE workspace_id=? AND document_id=? ORDER BY revision DESC LIMIT 100').all(account.workspaceId,id);
-  return NextResponse.json({versions:revisions.map(row=>({...(redactStoredValue(JSON.parse(row.payload as string)) as object),savedAt:row.savedAt}))},{headers:{'Cache-Control':'private, no-store'}});
+import { canSeeProject, projectPolicy, readTransaction, storedRecord } from '@/lib/server/db';
+import { redactStoredValue } from '@/lib/server/credential-guard';
+import { recordError, recordFailure, recordHeaders } from '@/lib/server/record-http';
+
+export const runtime = 'nodejs';
+
+export async function GET(request: NextRequest) {
+  const account = await getCurrentAccount();
+  if (!account) return recordError('Unauthorized', 401);
+  const id = request.nextUrl.searchParams.get('id');
+  if (!validRecordId(id)) return recordError('Invalid document id', 400);
+  try {
+    const versions = await readTransaction(async db => {
+      const policy = await projectPolicy(db, account);
+      const current = await storedRecord(db, account.workspaceId, 'docs', id);
+      if (!current || !canSeeProject(policy, current.project_id)) return;
+      const revisions = await db.all<{payload: string; savedAt: string}>(`SELECT payload,saved_at AS "savedAt"
+        FROM document_versions WHERE workspace_id=? AND document_id=? ORDER BY revision DESC LIMIT 100`, account.workspaceId, id);
+      return revisions.flatMap(row => {
+        const doc = JSON.parse(row.payload) as Doc;
+        if (!canSeeProject(policy, doc.projectId)) return [];
+        return [{ ...redactStoredValue(doc) as Doc, savedAt: row.savedAt }];
+      });
+    });
+    return versions ? NextResponse.json({ versions }, { headers: recordHeaders }) : recordError('Not found', 404);
+  } catch (error) {
+    return recordFailure(error);
+  }
 }

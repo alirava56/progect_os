@@ -36,7 +36,8 @@ export function download(name: string, content: string, type: string) {
 export function csv(rows: (string | number)[][]) {
   return '\ufeff' + rows.map(row => row.map(value => {
     const text = String(value);
-    const safe = typeof value === 'string' && /^[\s]*[=+@-]/.test(text) ? "'" + text : text;
+    const normalized = text.normalize('NFKC');
+    const safe = typeof value === 'string' && /^(?:[\s\u0000-\u001f]*[=+@-]|[\t\r\n])/.test(normalized) ? "'" + text : text;
     return '"' + safe.replaceAll('"', '""') + '"';
   }).join(',')).join('\r\n');
 }

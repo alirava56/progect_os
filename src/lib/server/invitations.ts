@@ -1,96 +1,135 @@
-/** Invite-only workspace memberships. Invite codes are random, expire, and never persist in plaintext. */
-import {randomBytes,randomUUID,createHash} from 'node:crypto';
-import {getDb,transaction,type Account,ForbiddenError} from './db';
-import {normalizeEmail,passwordHash,validatePassword,authenticate} from './auth';
-import {mfaEnabled,verifyMfa,verifyRecoveryCode} from './mfa';
-const codeHash=(value:string)=>createHash('sha256').update(value).digest('hex');
-function schema(){getDb().exec(`CREATE TABLE IF NOT EXISTS workspace_invites (
-  id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  email TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('editor','viewer')),
-  token_hash TEXT NOT NULL UNIQUE,expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
-  redeemed_at INTEGER, revoked_at INTEGER
-);CREATE INDEX IF NOT EXISTS idx_invites_workspace ON workspace_invites(workspace_id,created_at DESC);`);}
+import { randomBytes, randomUUID } from 'node:crypto';
+import { validRecordId } from '../record-contract';
+import { accountByUser, ForbiddenError, lockWorkspace, projectPolicy, sql, storedRecord, transaction, type Account, type SqlExecutor } from './db';
+import { authenticate, hash, normalizeEmail, passwordHash, rateLimit, safeDisplayLabel, validatePassword } from './auth';
+import { lockIdentity, mfaEnabled, verifyMfa, verifyRecoveryCode } from './mfa';
+
 export class InvitationError extends Error {}
-export function createInvitation(owner:Account,email:unknown,role:unknown){
-  if(owner.role!=='owner')throw new ForbiddenError();
-  const normalized=normalizeEmail(email);
-  if(!normalized||!['editor','viewer'].includes(String(role)))throw new InvitationError('INVALID_INVITATION');
-  schema();
-  const token=randomBytes(32).toString('base64url'),id=randomUUID(),createdAt=Date.now(),expiresAt=createdAt+48*3600*1000;
-  transaction(db=>{
-    const active=(db.prepare('SELECT count(*) AS n FROM workspace_invites WHERE workspace_id=? AND revoked_at IS NULL AND redeemed_at IS NULL AND expires_at>?').get(owner.workspaceId,createdAt) as {n:number}).n;
-    if(active>=20)throw new InvitationError('TOO_MANY_INVITES');
-    // Do not let one email accumulate multiple active invitations.
-    db.prepare('UPDATE workspace_invites SET revoked_at=? WHERE workspace_id=? AND email=? AND revoked_at IS NULL AND redeemed_at IS NULL').run(createdAt,owner.workspaceId,normalized);
-    db.prepare('INSERT INTO workspace_invites(id,workspace_id,email,role,token_hash,expires_at,created_at) VALUES(?,?,?,?,?,?,?)')
-      .run(id,owner.workspaceId,normalized,role as 'editor'|'viewer',codeHash(token),expiresAt,createdAt);
-  });
-  return {id,token,expiresAt};
-}
-export function listInvitations(owner:Account){
-  if(owner.role!=='owner')throw new ForbiddenError();schema();
-  const list=getDb().prepare(`SELECT id,email,role,created_at AS createdAt,expires_at AS expiresAt,
-    redeemed_at AS redeemedAt,revoked_at AS revokedAt FROM workspace_invites WHERE workspace_id=? ORDER BY created_at DESC LIMIT 100`).all(owner.workspaceId) as Array<{id:string;email:string;role:string;expiresAt:number;redeemedAt:number|null;revokedAt:number|null}>;
-  return list.map(i=>({...i,active:!i.redeemedAt&&!i.revokedAt&&i.expiresAt>Date.now()}));
-}
-export function revokeInvitation(owner:Account,id:string){
-  if(owner.role!=='owner')throw new ForbiddenError();schema();
-  return getDb().prepare('UPDATE workspace_invites SET revoked_at=? WHERE workspace_id=? AND id=? AND redeemed_at IS NULL AND revoked_at IS NULL')
-    .run(Date.now(),owner.workspaceId,id).changes===1;
-}
-export function acceptInvitation(input:{token:unknown;email:unknown;password:unknown;displayName:unknown;totp?:unknown;recoveryCode?:unknown}){
-  const email=normalizeEmail(input.email),password=input.password,name=typeof input.displayName==='string'?input.displayName.trim():'';
-  if(typeof input.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(input.token)||!email||!validatePassword(password)||!name||name.length>80)
-    throw new InvitationError('INVALID_INVITATION');
-  schema();
-  // Reject invalid/expired invite codes before attempting password verification;
-  // otherwise an attacker can lock out arbitrary users with bogus invite tokens.
-  const preliminary=getDb().prepare('SELECT id FROM workspace_invites WHERE token_hash=? AND email=? AND revoked_at IS NULL AND redeemed_at IS NULL AND expires_at>?')
-    .get(codeHash(input.token as string),email,Date.now()) as {id:string}|undefined;
-  if(!preliminary)throw new InvitationError('INVALID_INVITATION');
-  // Verify password outside invitation transaction: failed-login counters must persist.
-  const preexisting=getDb().prepare('SELECT id FROM users WHERE email=?').get(email) as {id:string}|undefined;
-  if(preexisting&&authenticate(email,password)!==preexisting.id)throw new InvitationError('INVALID_INVITATION');
-  // A member with MFA enabled must not be able to create a new authenticated session
-  // through the invitation endpoint by presenting only their password and invite code.
-  if(preexisting&&mfaEnabled(preexisting.id)){
-    const secondFactor=typeof input.recoveryCode==='string'&&input.recoveryCode.length>0
-      ?verifyRecoveryCode(preexisting.id,input.recoveryCode)
-      :verifyMfa(preexisting.id,input.totp);
-    if(!secondFactor)throw new InvitationError('SECOND_FACTOR_REQUIRED');
+
+async function projectScope(db: SqlExecutor, workspaceId: string, input: unknown): Promise<string | null> {
+  if (input === undefined || input === null) return null;
+  if (!Array.isArray(input) || input.length > 100 || !input.every(validRecordId)) throw new InvitationError('INVALID_PROJECT_GRANT');
+  const ids = [...new Set(input)];
+  for (const id of ids) {
+    if (!await storedRecord(db, workspaceId, 'projects', id)) throw new InvitationError('INVALID_PROJECT_GRANT');
   }
-  return transaction(db=>{
-    const invite=db.prepare('SELECT * FROM workspace_invites WHERE token_hash=?').get(codeHash(input.token as string)) as
-      {id:string;email:string;workspace_id:string;role:'editor'|'viewer';expires_at:number;redeemed_at:number|null;revoked_at:number|null}|undefined;
-    if(!invite||invite.email!==email||invite.expires_at<=Date.now()||invite.redeemed_at||invite.revoked_at)
-      throw new InvitationError('INVALID_INVITATION');
-    const exists=db.prepare('SELECT id FROM users WHERE email=?').get(email) as {id:string}|undefined;
-    let userId:string;
-    if(exists){
-      // An ex-member can be reinvited without deleting historical audit attribution.
-      // Password verification prevents someone with just the invite code from hijacking that identity.
-      if(!preexisting||preexisting.id!==exists.id)throw new InvitationError('INVALID_INVITATION');
-      const current=(db.prepare('SELECT count(*) AS n FROM memberships WHERE user_id=?').get(exists.id) as {n:number}).n;
-      if(current!==0)throw new InvitationError('ACCOUNT_ALREADY_IN_WORKSPACE');
-      userId=exists.id;
-    }else{
-      userId=randomUUID();const salt=randomBytes(24).toString('hex');
-      db.prepare('INSERT INTO users(id,email,display_name,password_hash,salt,created_at) VALUES(?,?,?,?,?,?)').run(userId,email,name,passwordHash(password as string,salt),salt,new Date().toISOString());
-    }
-    db.prepare('INSERT INTO memberships(user_id,workspace_id,role) VALUES(?,?,?)').run(userId,invite.workspace_id,invite.role);
-    db.prepare('UPDATE workspace_invites SET redeemed_at=? WHERE id=? AND redeemed_at IS NULL').run(Date.now(),invite.id);
-    return userId;
+  return JSON.stringify(ids);
+}
+
+async function lockOwner(db: SqlExecutor, account: Account) {
+  if (account.role !== 'owner' || !await lockWorkspace(db, account.workspaceId)) throw new ForbiddenError();
+  await projectPolicy(db, account);
+}
+
+export async function createInvitation(owner: Account, email: unknown, role: unknown, projectIds?: unknown) {
+  if (owner.role !== 'owner') throw new ForbiddenError();
+  const normalized = normalizeEmail(email);
+  if (!normalized || (role !== 'editor' && role !== 'viewer')) throw new InvitationError('INVALID_INVITATION');
+  const token = randomBytes(32).toString('base64url');
+  const id = randomUUID(), createdAt = Date.now(), expiresAt = createdAt + 48 * 3600_000;
+  await transaction(async db => {
+    await lockOwner(db, owner);
+    const grants = await projectScope(db, owner.workspaceId, projectIds);
+    await db.run(`UPDATE workspace_invites SET revoked_at=? WHERE workspace_id=? AND email=?
+      AND revoked_at IS NULL AND redeemed_at IS NULL`, createdAt, owner.workspaceId, normalized);
+    const active = await db.one<{n: number}>(`SELECT COUNT(*) AS n FROM workspace_invites WHERE workspace_id=?
+      AND revoked_at IS NULL AND redeemed_at IS NULL AND expires_at>?`, owner.workspaceId, createdAt);
+    if ((active?.n ?? 0) >= 20) throw new InvitationError('TOO_MANY_INVITES');
+    await db.run('INSERT INTO workspace_invites(id,workspace_id,email,role,token_hash,expires_at,created_at,project_ids) VALUES(?,?,?,?,?,?,?,?)',
+      id, owner.workspaceId, normalized, role, hash(token), expiresAt, createdAt, grants);
+  });
+  return { id, token, expiresAt };
+}
+
+export async function listInvitations(owner: Account) {
+  if (owner.role !== 'owner') throw new ForbiddenError();
+  await projectPolicy(sql, owner);
+  const list = await sql.all<{id: string; email: string; role: string; expiresAt: number; redeemedAt: number | null; revokedAt: number | null; project_ids: string | null}>(
+    `SELECT id,email,role,created_at AS "createdAt",expires_at AS "expiresAt",redeemed_at AS "redeemedAt",
+    revoked_at AS "revokedAt",project_ids FROM workspace_invites WHERE workspace_id=? ORDER BY created_at DESC LIMIT 100`,
+    owner.workspaceId);
+  return list.map(({ project_ids, ...item }) => ({
+    ...item, projectIds: project_ids === null ? null : JSON.parse(project_ids),
+    active: !item.redeemedAt && !item.revokedAt && item.expiresAt > Date.now(),
+  }));
+}
+
+export async function revokeInvitation(owner: Account, id: string) {
+  return transaction(async db => {
+    await lockOwner(db, owner);
+    return await db.run('UPDATE workspace_invites SET revoked_at=? WHERE workspace_id=? AND id=? AND redeemed_at IS NULL AND revoked_at IS NULL',
+      Date.now(), owner.workspaceId, id) === 1;
   });
 }
-export function removeMember(owner:Account,memberId:string){
-  if(owner.role!=='owner')throw new ForbiddenError();
-  if(owner.id===memberId)throw new InvitationError('CANNOT_REMOVE_OWNER');
-  return transaction(db=>{
-    const row=db.prepare('SELECT role FROM memberships WHERE user_id=? AND workspace_id=?').get(memberId,owner.workspaceId) as {role:string}|undefined;
-    if(!row||row.role==='owner')throw new InvitationError('CANNOT_REMOVE_OWNER');
-    const removed=db.prepare('DELETE FROM memberships WHERE workspace_id=? AND user_id=? AND role<>\'owner\'').run(owner.workspaceId,memberId).changes;
-    // Membership revoked means all sessions for the user are invalidated.
-    db.prepare('DELETE FROM sessions WHERE user_id=?').run(memberId);
-    return removed===1;
+
+type Invite = { id: string; email: string; workspace_id: string; project_ids: string | null; role: 'editor' | 'viewer' };
+
+export async function acceptInvitation(input: {token: unknown; email: unknown; password: unknown; displayName: unknown; totp?: unknown; recoveryCode?: unknown}) {
+  const email = normalizeEmail(input.email);
+  const name = safeDisplayLabel(input.displayName);
+  const { password, token } = input;
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token) || !email || !validatePassword(password) || !name) {
+    throw new InvitationError('INVALID_INVITATION');
+  }
+  const tokenHash = hash(token);
+  const lookup = `SELECT id,email,workspace_id,role,project_ids FROM workspace_invites
+    WHERE token_hash=? AND email=? AND revoked_at IS NULL AND redeemed_at IS NULL AND expires_at>?`;
+  const invite = await sql.one<Invite>(lookup, tokenHash, email, Date.now());
+  if (!invite) throw new InvitationError('INVALID_INVITATION');
+  const existing = await sql.one<{id: string}>('SELECT id FROM users WHERE email=?', email);
+  if (existing) {
+    const quota = await rateLimit('invitation-password', invite.id, 6, 15 * 60_000);
+    if (!quota.allowed || await authenticate(email, password) !== existing.id) throw new InvitationError('INVALID_INVITATION');
+  }
+  const salt = randomBytes(24).toString('hex');
+  const digest = existing ? null : await passwordHash(password, salt);
+  const result = await transaction(async db => {
+    await lockWorkspace(db, invite.workspace_id);
+    const current = await db.one<Invite>(lookup, tokenHash, email, Date.now());
+    if (!current) throw new InvitationError('INVALID_INVITATION');
+    const grants = await projectScope(db, current.workspace_id, current.project_ids === null ? null : JSON.parse(current.project_ids));
+    const id = existing?.id ?? randomUUID();
+    if (existing) {
+      await lockIdentity(db, id);
+      if (await accountByUser(id, db)) throw new InvitationError('ACCOUNT_ALREADY_IN_WORKSPACE');
+      if (await mfaEnabled(id, db)) {
+        const valid = typeof input.recoveryCode === 'string' && input.recoveryCode !== ''
+          ? await verifyRecoveryCode(id, input.recoveryCode, db)
+          : await verifyMfa(id, input.totp, db);
+        if (!valid) return null; // The failed second-factor counter must commit.
+      }
+    } else {
+      const inserted = await db.run(`INSERT INTO users(id,email,display_name,password_hash,salt,created_at) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(email) DO NOTHING`, id, email, name, digest, salt, new Date().toISOString());
+      if (!inserted) throw new InvitationError('INVALID_INVITATION');
+    }
+    await db.run('INSERT INTO memberships(user_id,workspace_id,role,project_ids) VALUES(?,?,?,?)',
+      id, current.workspace_id, current.role, grants);
+    await db.run('UPDATE workspace_invites SET redeemed_at=? WHERE id=?', Date.now(), current.id);
+    return id;
+  });
+  if (!result) throw new InvitationError('SECOND_FACTOR_REQUIRED');
+  return result;
+}
+
+export async function changeMemberScope(owner: Account, memberId: string, projects: unknown) {
+  if (projects === undefined) throw new InvitationError('INVALID_PROJECT_GRANT');
+  return transaction(async db => {
+    await lockOwner(db, owner);
+    const grants = await projectScope(db, owner.workspaceId, projects);
+    return await db.run("UPDATE memberships SET project_ids=? WHERE workspace_id=? AND user_id=? AND role<>'owner'",
+      grants, owner.workspaceId, memberId) === 1;
+  });
+}
+
+export async function removeMember(owner: Account, memberId: string) {
+  if (owner.id === memberId) throw new InvitationError('CANNOT_REMOVE_OWNER');
+  return transaction(async db => {
+    await lockOwner(db, owner);
+    await lockIdentity(db, memberId);
+    const row = await db.one<{role: string}>('SELECT role FROM memberships WHERE user_id=? AND workspace_id=?', memberId, owner.workspaceId);
+    if (!row || row.role === 'owner') throw new InvitationError('CANNOT_REMOVE_OWNER');
+    await db.run('DELETE FROM sessions WHERE user_id=?', memberId);
+    return await db.run('DELETE FROM memberships WHERE workspace_id=? AND user_id=?', owner.workspaceId, memberId) === 1;
   });
 }

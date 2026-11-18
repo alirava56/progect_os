@@ -1,3 +1,4 @@
+import { validRecordId } from '../record-contract';
 import type { DemoData } from '../types';
 import { emptyData } from '../empty-data';
 import { suspiciousInRecord } from './credential-guard';
@@ -11,13 +12,15 @@ const ruleSets={
   projects:{id:s(100),name:s(100),subtitle:s(150),coverTitle:s(150),description:s(4000),status:s(30,false,['building','review','active','archived']),archivedFrom:s(30,true,['building','review','active']),type:s(70),progress:n(100),next:s(400),art:s(100)},
   tasks:{id:s(100),title:s(200),projectId:s(100),status:s(20,false,['todo','doing','blocked','review','done']),priority:s(20,false,['low','medium','high']),owner:s(100),due:s(32),description:s(10000),checklist:{type:'checklist',max:200},comments:{type:'comments',max:500},dependencies:str(80)},
   resources:{id:s(100),name:s(160),projectId:s(100),type:s(24,false,['server','domain','database','service']),address:s(350),environment:s(50,false,['Production','Staging','Development']),status:s(25,false,['registered','review','missing']),provider:s(160),region:s(120,true),os:s(120,true),port:n(65535,true),expires:s(32,true),parentId:s(100,true),tags:str(20),linkedProjectIds:str(100)},
-  secrets:{id:s(100),name:s(160),projectId:s(100),type:s(30,false,['SSH Key','API Token','Account','DB Credential']),vaultProvider:s(160),lastCheckedAt:s(32,true),externalRef:s(500,true)},
-  reminders:{id:s(100),title:s(180),projectId:s(100),due:s(32),kind:s(20,false,['جلسه','تمدید','یادآوری'])},
+  secrets:{id:s(100),name:s(160),projectId:s(100),type:s(30,false,['SSH Key','API Token','Account','DB Credential']),
+    vaultProvider:s(160),lastCheckedAt:s(32,true),externalRef:s(500,true),vaultMount:s(80,true),vaultPath:s(240,true),rotationDue:s(32,true)},
+  reminders:{id:s(100),title:s(180),projectId:s(100),due:s(32),kind:s(20,false,['جلسه','تمدید','یادآوری']),
+    repeat:s(20,true,['none','daily','weekly','monthly','yearly']),zone:s(100,true),paused:{type:'boolean',optional:true}},
   incidents:{id:s(100),title:s(200),projectId:s(100),priority:s(20,false,['high','medium','low']),source:s(140),date:s(32),state:s(20,false,['open','acknowledged','snoozed']),snoozedUntil:s(32,true)},
-  expenses:{id:s(100),title:s(160),projectId:s(100),category:s(30,false,['زیرساخت','دامنه','پشتیبان‌گیری','اشتراک']),amount:n(1e12),date:s(32),status:s(20,false,['paid','upcoming'])},
-  charges:{id:s(100),projectId:s(100),title:s(160),provider:s(120),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),period:s(20,false,['monthly','quarterly','yearly']),nextDue:s(32),status:s(15,false,['active','paused']),linkedResourceId:s(100,true)},
-  contracts:{id:s(100),projectId:s(100),title:s(160),client:s(160),start:s(32),end:s(32),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),state:s(15,false,['draft','active','completed'])},
-  revenues:{id:s(100),projectId:s(100),title:s(160),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),date:s(32),status:s(20,false,['received','outstanding'])},
+  expenses:{id:s(100),title:s(160),projectId:s(100),category:s(30,false,['زیرساخت','دامنه','پشتیبان‌گیری','اشتراک']),amount:n(1e12),currency:s(10,true,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),date:s(32),status:s(20,false,['paid','upcoming'])},
+  charges:{id:s(100),projectId:s(100),title:s(160),provider:s(120),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),period:s(20,false,['monthly','quarterly','yearly']),nextDue:s(32),status:s(15,false,['active','paused']),linkedResourceId:s(100,true)},
+  contracts:{id:s(100),projectId:s(100),title:s(160),client:s(160),start:s(32),end:s(32),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),state:s(15,false,['draft','active','completed'])},
+  revenues:{id:s(100),projectId:s(100),title:s(160),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),date:s(32),status:s(20,false,['received','outstanding'])},
   docs:{id:s(100),title:s(180),projectId:s(100),type:s(30,false,['Runbook','Technical Design','Decision Record','Checklist','Release Notes']),body:s(100000),revision:n(1e6),updated:s(32)},
 } as const;
 type Collection=keyof typeof ruleSets;
@@ -59,24 +62,98 @@ function parseField(value:unknown,rule:Rule) {
   });
   return bad('Unrecognized field');
 }
-function parseCollection(value:unknown,kind:Collection,limit:number) {
-  if(!Array.isArray(value)||value.length>limit)bad(`Invalid ${kind} collection`);
-  const keys=ruleSets[kind] as Record<string,Rule>;
-  const ids=new Set<string>();
-  return value.map(item=>{
-    if(!plain(item))bad('Invalid record');
-    if(Object.keys(item).some(k=>!(k in keys)))bad(`Unrecognized field in ${kind}`);
-    const clean:Record<string,unknown>={};
-    for(const [key,rule] of Object.entries(keys)){
-      const field=parseField(item[key],rule);
-      if(field!==undefined)clean[key]=field;
-    }
-    const id=clean.id as string;
-    if(!id||ids.has(id))bad('Duplicate or empty record id');
-    if(suspiciousInRecord(clean))bad('Possible credential in unencrypted workspace field. Store it in your external vault instead.');
-    ids.add(id);
-    return clean;
+export function parseRecord<Kind extends Collection>(kind: Kind, item: unknown): DemoData[Kind][number] {
+  if (!plain(item)) bad('Invalid record');
+  const keys = ruleSets[kind] as Record<string, Rule>;
+  if (Object.keys(item).some(key => !Object.hasOwn(keys, key))) bad('Unrecognized field in ' + kind);
+  const clean: Record<string, unknown> = {};
+  for (const [key, rule] of Object.entries(keys)) {
+    const field = parseField(item[key], rule);
+    if (field !== undefined) clean[key] = field;
+  }
+  if (!validRecordId(clean.id)) bad('Invalid record id');
+  if (suspiciousInRecord(clean)) bad('Possible credential in unencrypted workspace field. Store it in your external vault instead.');
+  switch (kind) {
+    case 'tasks': checkDate(clean.due); break;
+    case 'reminders':
+      checkDate(clean.due);
+      if (clean.zone !== undefined) {
+        try { new Intl.DateTimeFormat('fa-IR', { timeZone: clean.zone as string }); }
+        catch { bad('Invalid reminder timezone'); }
+      }
+      break;
+    case 'resources':
+      checkAddress(clean.address as string);
+      if (clean.expires) checkDate(clean.expires);
+      if (clean.port !== undefined && (!Number.isInteger(clean.port) || Number(clean.port) < 1)) bad('Invalid resource port');
+      break;
+    case 'incidents':
+      checkDate(clean.date);
+      if (clean.snoozedUntil) checkDate(clean.snoozedUntil);
+      break;
+    case 'docs':
+      checkDate(clean.updated);
+      if (!Number.isSafeInteger(clean.revision) || Number(clean.revision) < 1) bad('Invalid document revision');
+      break;
+    case 'expenses':
+    case 'revenues': checkDate(clean.date); break;
+    case 'charges': checkDate(clean.nextDue); break;
+    case 'contracts':
+      checkDate(clean.start);
+      checkDate(clean.end);
+      if (Date.parse(clean.end as string) < Date.parse(clean.start as string)) bad('Contract end before start');
+      break;
+    case 'secrets':
+      if (clean.lastCheckedAt) checkDate(clean.lastCheckedAt);
+      if (clean.rotationDue) checkDate(clean.rotationDue);
+      if (clean.vaultMount !== undefined || clean.vaultPath !== undefined) {
+        if (clean.vaultProvider !== 'HashiCorp Vault' || typeof clean.vaultMount !== 'string'
+          || typeof clean.vaultPath !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(clean.vaultMount)
+          || !clean.vaultPath.split('/').every(part => /^[a-zA-Z0-9_-]+$/.test(part))) bad('Invalid metadata locator');
+      }
+      if (clean.externalRef && !vaultLink(clean.externalRef as string)) {
+        bad('External vault link must belong to an approved vault hostname (HTTPS)');
+      }
+      break;
+  }
+  if (Object.hasOwn(clean, 'amount') && !Number.isSafeInteger(clean.amount)) bad('Monetary amounts must be integer minor units');
+  return clean as unknown as DemoData[Kind][number];
+}
+
+function parseCollection<Kind extends Collection>(value: unknown, kind: Kind, limit: number): DemoData[Kind] {
+  if (!Array.isArray(value) || value.length > limit) bad('Invalid ' + kind + ' collection');
+  const ids = new Set<string>();
+  const records = value.map(item => {
+    const record = parseRecord(kind, item);
+    if (ids.has(record.id)) bad('Duplicate record id');
+    ids.add(record.id);
+    return record;
   });
+  return records as DemoData[Kind];
+}
+
+// Kahn's algorithm avoids unbounded recursion on long dependency chains.
+export function validateGraph(edges: ReadonlyMap<string, readonly string[]>, name: string) {
+  const incoming = new Map(Array.from(edges.keys(), id => [id, 0]));
+  for (const refs of edges.values()) {
+    for (const ref of refs) {
+      const degree = incoming.get(ref);
+      if (degree === undefined) bad('Invalid reference in ' + name);
+      incoming.set(ref, degree + 1);
+    }
+  }
+  const ready = Array.from(incoming).filter(([, degree]) => degree === 0).map(([id]) => id);
+  let seen = 0;
+  while (ready.length) {
+    const id = ready.pop()!;
+    seen++;
+    for (const ref of edges.get(id) ?? []) {
+      const degree = incoming.get(ref)! - 1;
+      incoming.set(ref, degree);
+      if (!degree) ready.push(ref);
+    }
+  }
+  if (seen !== edges.size) bad('Cycle in ' + name);
 }
 function checkDate(date:unknown) {
   if(typeof date!=='string')bad('Date must be YYYY-MM-DD or UTC ISO string');
@@ -97,11 +174,12 @@ function checkAddress(address:string) {
     if(!['http:','https:'].includes(url.protocol)||url.username||url.password)bad('Unsupported URL');
   }else if(address.includes('@')||address.includes('://'))bad('Credential-containing address is prohibited');
 }
-function preferences(value:unknown):DemoData['preferences']{
+export function parsePreferences(value:unknown):DemoData['preferences']{
   if(!plain(value))bad('Invalid preferences');
   const defaults=emptyData.preferences;
   const allowed=Object.keys(defaults);
   if(Object.keys(value).some(k=>!allowed.includes(k)))bad('Unexpected preference');
+  if(suspiciousInRecord(value))bad('Possible credential in workspace preferences');
   return {
     workspace:text(value.workspace,80) as string,displayName:text(value.displayName,80) as string,
     theme:text(value.theme,10,false,['dark','dim']) as 'dark'|'dim',
@@ -129,54 +207,17 @@ export function parseState(value:unknown):CanonicalState {
     contracts:parseCollection(value.contracts,'contracts',5000),
     revenues:parseCollection(value.revenues,'revenues',10000),
     docs:parseCollection(value.docs,'docs',5000),
-    preferences:preferences(value.preferences),
+    preferences:parsePreferences(value.preferences),
   } as unknown as CanonicalState;
-  const projects=new Set(state.projects.map(p=>p.id));
-  const tasks=new Set(state.tasks.map(t=>t.id));
-  const resources=new Set(state.resources.map(r=>r.id));
-  for(const kind of ['tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs'] as const)
-    for(const record of state[kind])if(!projects.has(record.projectId))bad(`Unknown project in ${kind}`);
-  for(const r of state.resources){
-    checkAddress(r.address);
-    if(r.parentId&&(!resources.has(r.parentId)||r.parentId===r.id))bad('Invalid resource parent');
-    if(r.expires)checkDate(r.expires);
-    if(r.linkedProjectIds?.some(id=>!projects.has(id)))bad('Invalid shared resource project');
-    if(r.port!==undefined&&(!Number.isInteger(r.port)||r.port<1))bad('Invalid resource port');
-  }
-  const parentById=new Map(state.resources.map(r=>[r.id,r.parentId]));
-  const visitedResources=new Set<string>(),visitingResources=new Set<string>();
-  const visitResource=(id:string)=>{
-    if(visitingResources.has(id))bad('Resource parent cycle');
-    if(visitedResources.has(id))return;
-    visitingResources.add(id);
-    const parent=parentById.get(id);if(parent)visitResource(parent);
-    visitingResources.delete(id);visitedResources.add(id);
-  };
-  for(const id of resources)visitResource(id);
-  const dependencies=new Map(state.tasks.map(t=>[t.id,t.dependencies]));
-  for(const task of state.tasks){checkDate(task.due);if(task.dependencies.some(id=>!tasks.has(id)||id===task.id))bad('Invalid task dependency');}
-  const seen=new Set<string>(),visiting=new Set<string>();
-  const visit=(id:string)=>{if(visiting.has(id))bad('Task dependency cycle');if(seen.has(id))return;visiting.add(id);for(const d of dependencies.get(id)??[])visit(d);visiting.delete(id);seen.add(id);};
-  for(const id of tasks)visit(id);
-  for(const r of state.reminders)checkDate(r.due);
-  for(const r of state.incidents){checkDate(r.date);if(r.snoozedUntil)checkDate(r.snoozedUntil);}
-  for(const e of state.expenses){checkDate(e.date);if(!Number.isSafeInteger(e.amount))bad('Expense must use integer amounts (legacy TOMAN unit)');}
-  for(const d of state.docs)checkDate(d.updated);
-  for(const c of state.charges){
-    checkDate(c.nextDue);
-    if(c.linkedResourceId&&!resources.has(c.linkedResourceId))bad('Invalid charge resource reference');
-    if(!Number.isSafeInteger(c.amount))bad('Monetary amounts must be integer minor units');
-  }
-  for(const c of state.contracts){
-    checkDate(c.start);
-    checkDate(c.end);
-    if(Date.parse(c.end)<Date.parse(c.start))bad('Contract end before start');
-    if(!Number.isSafeInteger(c.amount))bad('Monetary amounts must be integers');
-  }
-  for(const r of state.revenues){checkDate(r.date);if(!Number.isSafeInteger(r.amount))bad('Monetary amounts must be integers');}
-  for(const s of state.secrets){
-    if(s.lastCheckedAt)checkDate(s.lastCheckedAt);
-    if(s.externalRef&&!vaultLink(s.externalRef))bad('External vault link must belong to an approved vault hostname (HTTPS)');
-  }
+  const projects = new Set(state.projects.map(project => project.id));
+  const resources = new Set(state.resources.map(resource => resource.id));
+  for (const kind of ['tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs'] as const)
+    for (const record of state[kind]) if (!projects.has(record.projectId)) bad('Unknown project in ' + kind);
+  for (const resource of state.resources)
+    if (resource.linkedProjectIds?.some(id => !projects.has(id))) bad('Invalid shared resource project');
+  for (const charge of state.charges)
+    if (charge.linkedResourceId && !resources.has(charge.linkedResourceId)) bad('Invalid charge resource reference');
+  validateGraph(new Map(state.resources.map(resource => [resource.id, resource.parentId ? [resource.parentId] : []])), 'resource parents');
+  validateGraph(new Map(state.tasks.map(task => [task.id, task.dependencies])), 'task dependencies');
   return state;
 }

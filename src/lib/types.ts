@@ -58,8 +58,14 @@ export interface SecretReference {
   vaultProvider: string;
   lastCheckedAt?: string;
   externalRef?: string;
+  vaultMount?: string;
+  vaultPath?: string;
+  rotationDue?: string;
 }
-export interface Reminder { id: string; title: string; projectId: string; due: string; kind: 'جلسه' | 'تمدید' | 'یادآوری' }
+export interface Reminder {
+  id: string; title: string; projectId: string; due: string; kind: 'جلسه' | 'تمدید' | 'یادآوری';
+  repeat?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'; zone?: string; paused?: boolean;
+}
 export interface Incident {
   id: string;
   title: string;
@@ -76,21 +82,23 @@ export interface Expense {
   projectId: string;
   category: 'زیرساخت' | 'دامنه' | 'پشتیبان‌گیری' | 'اشتراک';
   amount: number;
+  currency?: CurrencyUnit;
+  amountUnit?: 'minor';
   date: string;
   status: 'paid' | 'upcoming';
 }
 export type CurrencyUnit = 'TOMAN' | 'IRR' | 'USD';
 export interface RecurringCharge {
   id:string;projectId:string;title:string;provider:string;
-  amount:number;currency:CurrencyUnit;period:'monthly'|'quarterly'|'yearly';
+  amount:number;currency:CurrencyUnit;amountUnit?:'minor';period:'monthly'|'quarterly'|'yearly';
   nextDue:string;status:'active'|'paused';linkedResourceId?:string;
 }
 export interface ContractRecord {
   id:string;projectId:string;title:string;client:string;start:string;end:string;
-  amount:number;currency:CurrencyUnit;state:'draft'|'active'|'completed';
+  amount:number;currency:CurrencyUnit;amountUnit?:'minor';state:'draft'|'active'|'completed';
 }
 export interface RevenueEntry {
-  id:string;projectId:string;title:string;amount:number;currency:CurrencyUnit;
+  id:string;projectId:string;title:string;amount:number;currency:CurrencyUnit;amountUnit?:'minor';
   date:string;status:'received'|'outstanding';
 }
 export interface Doc { id: string; title: string; projectId: string; type: DocType; body: string; revision: number; updated: string }

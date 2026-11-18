@@ -174,7 +174,8 @@ export function ReminderForm({ onClose, due, projectId }: { onClose: () => void;
   function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('title')) { setError('عنوان رویداد را وارد کنید.'); return; }
-    const item: Reminder = { id:newId('reminder'), title:get('title'), projectId:get('project'), due:get('due'), kind:get('kind') as Reminder['kind'] };
+    const item: Reminder = { id:newId('reminder'), title:get('title'), projectId:get('project'), due:get('due'),
+      kind:get('kind') as Reminder['kind'], repeat:get('repeat') as Reminder['repeat'], zone:get('zone')||undefined };
     change(data => ({ ...data, reminders:[...data.reminders,item] }), 'یادآوری ثبت شد.', { projectId:item.projectId, title:item.title, source:'تقویم' });
     onClose();
   }
@@ -186,6 +187,12 @@ export function ReminderForm({ onClose, due, projectId }: { onClose: () => void;
       <Field label="موعد (میلادی)"><input dir="ltr" required name="due" type="date" defaultValue={due ?? today()} /></Field>
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="form-grid">
+      <Field label="تکرار"><select name="repeat"><option value="none">یک‌بار</option><option value="daily">روزانه</option>
+        <option value="weekly">هفتگی</option><option value="monthly">ماهانه</option><option value="yearly">سالانه</option></select></Field>
+      <Field label="منطقهٔ زمانی"><select name="zone"><option value="">منطقهٔ زمانی فضای کاری</option>
+        <option value="Asia/Tehran">تهران</option><option value="UTC">UTC</option><option value="Europe/Berlin">برلین</option></select></Field>
+    </div>
     <FormActions onClose={onClose} submit="ثبت رویداد" />
   </form></Modal>;
 }

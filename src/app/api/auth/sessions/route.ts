@@ -1,36 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {cookies} from 'next/headers';
-import {checkOrigin,getCurrentAccount,authenticate,COOKIE,readLimitedJson} from '@/lib/server/auth';
-import {getDb} from '@/lib/server/db';
-import {mfaEnabled,verifyMfa} from '@/lib/server/mfa';
-import {createHash} from 'node:crypto';
-export const runtime='nodejs';
-export const dynamic='force-dynamic';
-const headers={'Cache-Control':'private, no-store'};
-export async function GET(){
-  const account=await getCurrentAccount();
-  if(!account)return NextResponse.json({error:'Unauthenticated'},{status:401,headers});
-  const rows=getDb().prepare('SELECT created_at AS createdAt,expires_at AS expiresAt FROM sessions WHERE user_id=? AND expires_at>? ORDER BY created_at DESC').all(account.id,Date.now());
-  // No session token or token hash leaves the server.
-  return NextResponse.json({sessions:rows,count:rows.length},{headers});
+import { authenticate, checkOrigin, getCurrentAccount, hash, rateLimit, readLimitedJson, readSessionToken, SESSION_IDLE_MS, signOut } from '@/lib/server/auth';
+import { sql, transaction } from '@/lib/server/db';
+import { apiError, jsonError, noStore } from '@/lib/server/http';
+import { lockIdentity, mfaEnabled, verifyMfa } from '@/lib/server/mfa';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+const reference = (tokenHash: string) => hash('projectos:session-reference:' + tokenHash);
+
+export async function GET() {
+  const account = await getCurrentAccount();
+  const token = await readSessionToken();
+  if (!account || !token) return apiError('Unauthenticated', 401);
+  const now = Date.now();
+  const rows = await sql.all<{token_hash: string; createdAt: number; expiresAt: number; lastSeenAt: number}>(
+    `SELECT token_hash,created_at AS "createdAt",expires_at AS "expiresAt",last_seen_at AS "lastSeenAt"
+      FROM sessions WHERE user_id=? AND expires_at>? AND last_seen_at>? ORDER BY created_at DESC`,
+    account.id, now, now - SESSION_IDLE_MS,
+  );
+  const current = hash(token);
+  const sessions = rows.map(({token_hash, ...metadata}) => ({
+    ...metadata, id: reference(token_hash), current: token_hash === current,
+  }));
+  return NextResponse.json({ sessions, count: sessions.length }, { headers: noStore });
 }
-export async function POST(request:NextRequest){
-  const account=await getCurrentAccount();
-  if(!account)return NextResponse.json({error:'Unauthenticated'},{status:401,headers});
-  if(!checkOrigin(request))return NextResponse.json({error:'Origin rejected'},{status:403,headers});
-  let input:unknown;try{input=await readLimitedJson(request,1000);}catch{return NextResponse.json({error:'Invalid JSON'},{status:400,headers});}
-  if(!input||typeof input!=='object')return NextResponse.json({error:'Invalid body'},{status:400,headers});
-  const {password,totp,action}=input as {password?:unknown;totp?:unknown;action?:unknown};
-  if(action!=='revokeOthers'&&action!=='revokeAll')return NextResponse.json({error:'Unsupported action'},{status:422,headers});
-  if(authenticate(account.email,password)!==account.id)return NextResponse.json({error:'Re-authentication failed'},{status:403,headers});
-  if(mfaEnabled(account.id)&&!verifyMfa(account.id,totp))return NextResponse.json({error:'Second factor required'},{status:403,headers});
-  const jar=await cookies();
-  const token=jar.get(COOKIE)?.value;
-  if(!token)return NextResponse.json({error:'Session missing'},{status:401,headers});
-  const hash=createHash('sha256').update(token).digest('hex');
-  const result=action==='revokeOthers'
-    ?getDb().prepare('DELETE FROM sessions WHERE user_id=? AND token_hash<>?').run(account.id,hash)
-    :getDb().prepare('DELETE FROM sessions WHERE user_id=?').run(account.id);
-  if(action==='revokeAll')jar.delete(COOKIE);
-  return NextResponse.json({ok:true,revoked:result.changes,signedOut:action==='revokeAll'},{headers});
+
+export async function POST(request: NextRequest) {
+  if (!checkOrigin(request)) return apiError('Origin rejected', 403);
+  const account = await getCurrentAccount();
+  const token = await readSessionToken();
+  if (!account || !token) return apiError('Unauthenticated', 401);
+  let input: unknown;
+  try { input = await readLimitedJson(request, 1024); }
+  catch (error) { return jsonError(error); }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return apiError('Invalid body', 400);
+  const { action, password, totp, sessionId } = input as { action?: unknown; password?: unknown; totp?: unknown; sessionId?: unknown };
+  if (action !== 'revokeOthers' && action !== 'revokeAll' && action !== 'revokeOne') return apiError('Unsupported action', 422);
+  const quota = await rateLimit('sessions:reauthenticate', account.id, 8, 60_000);
+  if (!quota.allowed) return apiError('Try again later', 429, {'Retry-After': String(quota.retryAfter)});
+  if (await authenticate(account.email, password) !== account.id) return apiError('Re-authentication failed', 403);
+  const current = hash(token);
+  const result = await transaction(async db => {
+    await lockIdentity(db, account.id);
+    if (!await db.one('SELECT token_hash FROM sessions WHERE user_id=? AND token_hash=?', account.id, current)) return { status: 401 as const };
+    if (await mfaEnabled(account.id, db) && !await verifyMfa(account.id, totp, db)) return { status: 403 as const };
+    if (action === 'revokeOne') {
+      const sessions = await db.all<{token_hash: string}>('SELECT token_hash FROM sessions WHERE user_id=?', account.id);
+      const target = sessions.find(session => reference(session.token_hash) === sessionId);
+      if (!target) return { status: 404 as const };
+      return {
+        status: 200 as const, signedOut: target.token_hash === current,
+        revoked: await db.run('DELETE FROM sessions WHERE user_id=? AND token_hash=?', account.id, target.token_hash),
+      };
+    }
+    const revoked = action === 'revokeOthers'
+      ? await db.run('DELETE FROM sessions WHERE user_id=? AND token_hash<>?', account.id, current)
+      : await db.run('DELETE FROM sessions WHERE user_id=?', account.id);
+    return { status: 200 as const, revoked, signedOut: action === 'revokeAll' };
+  });
+  if (result.status !== 200) return apiError('Session or second factor rejected', result.status);
+  if (result.signedOut) await signOut();
+  return NextResponse.json({ ok: true, revoked: result.revoked, signedOut: result.signedOut }, { headers: noStore });
 }

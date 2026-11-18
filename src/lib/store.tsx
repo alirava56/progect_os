@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { emptyData } from './empty-data';
-import { newId, now } from './format';
+import { recordKinds, type RecordChange } from './record-contract';
 import type { ActivityEvent, DemoData, Preferences } from './types';
 
 interface Store {
@@ -16,18 +16,34 @@ interface Store {
 }
 const DemoContext = createContext<Store | null>(null);
 
-export function DemoProvider({ children, initialData, initialVersion=0, authenticated=false }: {children:ReactNode;initialData?:DemoData;initialVersion?:number;authenticated?:boolean}) {
-  const [data, setData] = useState<DemoData>(()=>structuredClone(initialData??emptyData));
+function changesBetween(previous: DemoData, next: DemoData) {
+  const changes: RecordChange[] = [];
+  for (const kind of recordKinds) {
+    const previousById = new Map(previous[kind].map(record => [record.id, record]));
+    for (const record of next[kind]) {
+      const existing = previousById.get(record.id);
+      if (!existing) changes.push({ kind, id: record.id, action: 'create', record });
+      else if (JSON.stringify(existing) !== JSON.stringify(record)) changes.push({ kind, id: record.id, action: 'replace', record });
+      previousById.delete(record.id);
+    }
+    for (const id of previousById.keys()) changes.push({ kind, id, action: 'delete' });
+  }
+  return changes;
+}
+
+export function DemoProvider({ children, initialData, initialVersion = 0, authenticated = false }: {
+  children: ReactNode; initialData?: DemoData; initialVersion?: number; authenticated?: boolean;
+}) {
+  const [data, setData] = useState(() => structuredClone(initialData ?? emptyData));
   const dataRef = useRef(data);
   const revision = useRef(initialVersion);
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const broken = useRef(false);
-  const [saving,setSaving]=useState(false);
-  const [syncError,setSyncError]=useState<string|null>(null);
+  const pending = useRef(0);
+  const [saving, setSaving] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [projectScope, setProjectScope] = useState('');
   const [message, setMessage] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pending=useRef(0);
 
   useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
@@ -41,72 +57,69 @@ export function DemoProvider({ children, initialData, initialVersion=0, authenti
     timer.current = setTimeout(() => setMessage(''), 5500);
   }, []);
 
-  const change: Store['change'] = (mutator, text, event) => {
+  async function refreshState() {
+    const response = await fetch('/api/state', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('Refresh failed');
+    const snapshot = await response.json() as { data: DemoData; version: number };
+    dataRef.current = snapshot.data;
+    revision.current = snapshot.version;
+    setData(snapshot.data);
+  }
+
+  const change: Store['change'] = (mutator, text) => {
     if (!authenticated) { notice('برای ذخیره اطلاعات، ابتدا وارد حساب خود شوید.'); return; }
-    if(broken.current) {notice('ذخیره‌سازی متوقف شد. برای جلوگیری از از دست رفتن داده صفحه را بازخوانی کنید.');return;}
-    const previous=structuredClone(dataRef.current);
-    let next:DemoData;
-    try {
-      next=mutator(structuredClone(previous));
-    }catch {notice('انجام تغییر امکان‌پذیر نبود.');return;}
-    const role=initialData?.users[0]?.role??'Viewer';
-    if(role==='Viewer'){notice('حساب شما فقط مجوز مشاهده دارد.');return;}
-    let recordEdit:{kind:string;id:string;action:'create'|'replace'|'delete';record?:unknown}|null=null;
-    if(role==='Developer'){
-      if(JSON.stringify(next.preferences)!==JSON.stringify(previous.preferences)){
-        notice('ویرایش تنظیمات فقط برای مالک مجاز است.');return;
-      }
-      const allowed=['tasks','docs','reminders','incidents'] as const;
-      const allKinds=['projects','tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs'] as const;
-      const changes:Array<{kind:string;id:string;action:'create'|'replace'|'delete';record?:unknown}>=[];
-      for(const kind of allKinds){
-        const oldItems=previous[kind] as Array<{id:string}>,newItems=next[kind] as Array<{id:string}>;
-        const oldMap=new Map(oldItems.map(item=>[item.id,item]));
-        const newMap=new Map(newItems.map(item=>[item.id,item]));
-        for(const item of oldItems)if(!newMap.has(item.id))changes.push({kind,id:item.id,action:'delete'});
-        for(const item of newItems){
-          if(!oldMap.has(item.id))changes.push({kind,id:item.id,action:'create',record:item});
-          else if(JSON.stringify(oldMap.get(item.id))!==JSON.stringify(item))changes.push({kind,id:item.id,action:'replace',record:item});
-        }
-      }
-      if(changes.length!==1||!allowed.includes(changes[0].kind as typeof allowed[number])){
-        notice('این عملیات برای نقش توسعه‌دهنده مجاز نیست یا چند رکورد را هم‌زمان تغییر می‌دهد.');return;
-      }
-      recordEdit=changes[0];
-    }
-    if(event) {
-      const evt:ActivityEvent={id:newId('local-event'),date:now(),actor:next.preferences.displayName,detail:event.detail||text,...event};
-      next={...next,events:[evt,...next.events]};
-    }
-    dataRef.current=next;
-    setData(next);
+    if (dataRef.current.users[0]?.role === 'Viewer') { notice('حساب شما فقط مجوز مشاهده دارد.'); return; }
+    const previous = dataRef.current;
+    const version = revision.current;
+    let next: DemoData;
+    try { next = mutator(structuredClone(previous)); }
+    catch { notice('انجام تغییر امکان‌پذیر نبود.'); return; }
+
+    const changes = changesBetween(previous, next);
+    const preferences = JSON.stringify(previous.preferences) === JSON.stringify(next.preferences) ? undefined : next.preferences;
+    if (!changes.length && !preferences) return;
+    const body = JSON.stringify({ version, changes, preferences });
     setSaving(true);
     pending.current++;
-    const snapshot=structuredClone(next);
-    queue.current=queue.current.then(async()=>{
-      if(broken.current)return;
-      const response=await fetch(recordEdit?`/api/records/${encodeURIComponent(recordEdit.kind)}/${encodeURIComponent(recordEdit.id)}`:'/api/state',{
-        method:recordEdit?(recordEdit.action==='create'?'POST':recordEdit.action==='delete'?'DELETE':'PUT'):'PUT',
-        credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},
-        body:recordEdit?JSON.stringify({version:revision.current,record:recordEdit.record}):JSON.stringify({version:revision.current,data:snapshot}),
-      });
-      if(!response.ok)throw new Error(`HTTP ${response.status}`);
-      const payload=await response.json() as {version:number};
-      revision.current=payload.version;
-      if(pending.current===1)notice(text);
-    }).catch((error:unknown)=>{
-      broken.current=true;
-      const message=error instanceof Error?error.message:'Network error';
-      setSyncError(`تغییرات جدید ذخیره نشدند (${message}). برای جلوگیری از تداخل، صفحه را بازخوانی کنید.`);
-      notice('خطا در ذخیره‌سازی. تغییرات فعلی تأیید نشده‌اند.');
-    }).finally(()=>{
-      pending.current=Math.max(0,pending.current-1);
-      if(pending.current===0)setSaving(false);
+    queue.current = queue.current.then(async () => {
+      let confirmed = false;
+      try {
+        const response = await fetch('/api/records', {
+          method: 'PATCH', credentials: 'same-origin', cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' }, body,
+        });
+        if (response.status === 409) {
+          await refreshState();
+          setSyncError('رکورد تغییر کرده است. آخرین نسخه دریافت شد. تغییر را دوباره بررسی و ثبت کنید.');
+          return;
+        }
+        if (!response.ok) {
+          setSyncError(response.status === 403
+            ? 'حساب شما اجازهٔ انجام این تغییر را ندارد.'
+            : 'سرور تغییر را نپذیرفت. ورودی‌ها را بررسی کنید و دوباره تلاش کنید.');
+          return;
+        }
+        confirmed = true;
+        await refreshState();
+        setSyncError(null);
+        notice(text);
+      } catch {
+        setSyncError(confirmed
+          ? 'تغییر ذخیره شد. برای دریافت آخرین داده‌ها، صفحه را تازه کنید.'
+          : 'نتیجهٔ ذخیره تأیید نشد. پیش از تلاش مجدد، صفحه را تازه کنید.');
+      }
+    }).finally(() => {
+      pending.current--;
+      if (!pending.current) setSaving(false);
     });
   };
+
   return <DemoContext.Provider value={{ data, change, notice, projectScope, setProjectScope, saving, syncError }}>
     {children}
-    {authenticated && (saving||syncError) && <div className="sync-status" role="status" aria-live="polite">{syncError ? <><strong>ذخیره ناموفق</strong><span>{syncError}</span><button onClick={()=>location.reload()}>بارگذاری دوباره</button></> : 'در حال ذخیره تغییرات…'}</div>}
+    {authenticated && (saving || syncError) && <div className="sync-status" role="status" aria-live="polite">
+      {syncError ? <><span>{syncError}</span><button onClick={() => location.reload()}>بارگذاری دوباره</button></>
+        : 'در حال ذخیره تغییرات…'}
+    </div>}
     <div className="toast-container" role="status" aria-live="polite">{message && <div className="toast">{message}</div>}</div>
   </DemoContext.Provider>;
 }
@@ -116,6 +129,4 @@ export function useDemo() {
   if (!store) throw new Error('DemoProvider missing');
   return store;
 }
-// The UI still calls this helper, but persistence is handled solely by the authenticated server API.
-// Never copy workspace information into LocalStorage.
-export function savePreferences(preferences: Preferences) { return !!preferences; }
+export function savePreferences(preferences: Preferences) { return Boolean(preferences); }

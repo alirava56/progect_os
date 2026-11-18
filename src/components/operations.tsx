@@ -12,8 +12,8 @@ import { Button, Callout, Empty, Filter, Heading, Metrics, Modal, Panel, Pill, R
 export function Monitoring() {
   const { data }=useDemo();
   const [query,setQuery]=useState('');
-  const [clock]=useState(()=>Date.now());
-  const [observations,setObservations]=useState<Array<{resourceId:string;checkedAt:string;state:string;statusCode:number|null;latencyMs:number|null}>>([]);
+  const [observations,setObservations]=useState<Array<{resourceId:string;checkedAt:string;state:string;statusCode:number|null;latencyMs:number|null;tlsExpiresAt:string|null}>>([]);
+  const [machine,setMachine]=useState<Array<{resourceId:string;checkedAt:string;cpuPercent:number;usedBytes:number;totalBytes:number;state:string}>>([]);
   const [monitorStatus,setMonitorStatus]=useState<'loading'|'not_configured'|'configured'|'error'>('loading');
   useEffect(()=>{
     let cancelled=false;
@@ -23,11 +23,17 @@ export function Monitoring() {
     }).then(payload=>{
       if(cancelled)return;
       setObservations(Array.isArray(payload.observations)?payload.observations:[]);
+      setMachine(Array.isArray(payload.machineObservations)?payload.machineObservations:[]);
       setMonitorStatus(payload.status==='configured'?'configured':'not_configured');
     }).catch(()=>{if(!cancelled)setMonitorStatus('error');});
     return ()=>{cancelled=true;};
   },[]);
   const latest=new Map<string,(typeof observations)[number]>();
+  const [clock,setClock]=useState(()=>Date.now());
+  useEffect(()=>{
+    const timer=setInterval(()=>setClock(Date.now()),30_000);
+    return ()=>clearInterval(timer);
+  },[]);
   for(const obs of observations){if(!latest.has(obs.resourceId))latest.set(obs.resourceId,obs);}
   const fresh=(id:string)=>{
     const observation=latest.get(id);
@@ -56,9 +62,18 @@ export function Monitoring() {
       <Panel title="آخرین مشاهدات HTTPS">{observations.length?
         <div className="stack">{observations.slice(0,12).map((o,index)=><Row key={`${o.resourceId}-${o.checkedAt}-${index}`} icon={Activity}
           title={data.resources.find(r=>r.id===o.resourceId)?.name??'منبع'}
-          meta={<>{dateLabel(o.checkedAt,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · کد {o.statusCode??'نامشخص'} · {o.latencyMs??'—'} ms</>}
+          meta={<>{dateLabel(o.checkedAt,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · کد {o.statusCode??'نامشخص'} · {o.latencyMs??'—'} ms
+            {o.tlsExpiresAt?' · انقضای TLS '+dateLabel(o.tlsExpiresAt):''}</>}
           end={<Pill tone={o.state==='healthy'?'good':'warn'}>{o.state==='healthy'?'HTTPS پاسخ‌گو':o.state==='unhealthy'?'HTTPS ناموفق':'وضعیت نامشخص'}</Pill>}/>)}</div>:
         <Empty title="هنوز مشاهده‌ای ثبت نشده" detail="در صورت فعال‌سازی میزبان‌های مجاز و اجرای Worker، نتایج HTTPS در اینجا نمایش داده می‌شوند."/>}</Panel>
+      <Panel title="آخرین گزارش‌های عامل میزبان">
+        {machine.length?machine.slice(0,10).map(o=><Row key={o.resourceId+o.checkedAt} icon={Activity}
+          title={data.resources.find(r=>r.id===o.resourceId)?.name??'منبع'}
+          meta={dateLabel(o.checkedAt,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+' · عامل میزبان'}
+          end={o.state==='observed'&&clock-Date.parse(o.checkedAt)<=900_000
+            ? <Pill>CPU {Math.round(o.cpuPercent)}٪ · RAM {Math.round(o.usedBytes/o.totalBytes*100)}٪</Pill>
+            : <Pill tone="warn">گزارش قدیمی</Pill>}/>) : <Empty title="گزارشی از عامل میزبان دریافت نشده" />}
+      </Panel>
     </div>
   </>;
 }

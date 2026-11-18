@@ -1,8 +1,9 @@
 'use client';
+import { amountLabel, inputAmount, minorUnits, parseAmount, summaryByCurrency, totalsByCurrency } from '@/lib/money';
 
 import { useState, type FormEvent } from 'react';
 import { CalendarDays, ChartNoAxesCombined, CircleAlert, CircleCheck, CreditCard, Download, FileText, FolderKanban, Layers, Plus, ReceiptText, Server, Wallet } from 'lucide-react';
-import { csv, dateLabel, download, matches, money, newId, percent, today } from '@/lib/format';
+import { csv, dateLabel, download, matches, newId, percent, today } from '@/lib/format';
 import { useDemo } from '@/lib/store';
 import type { Expense, RecurringCharge, ContractRecord, RevenueEntry, CurrencyUnit } from '@/lib/types';
 import { Bars, Donut, Trend } from './charts';
@@ -10,14 +11,16 @@ import { ProjectField, ProjectFilter, SelectOptions, projectName } from './forms
 import { Button, Callout, Empty, Field, Filter, FormActions, Heading, Metrics, Modal, Panel, Pill, Progress, Row, SearchField, SectionBar, Table, TextLink, formValues } from './ui';
 
 const categories: Expense['category'][] = ['زیرساخت','دامنه','پشتیبان‌گیری','اشتراک'];
-const sum = (items: Expense[]) => items.reduce((total,e) => total + e.amount,0);
 
 function ExpenseForm({ onClose, initial, projectId }: { onClose: () => void; initial?: Expense; projectId: string }) {
   const { change, notice } = useDemo();
   function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('name')) { notice('شرح هزینه را وارد کنید.'); return; }
-    const expense: Expense = { id:initial?.id ?? newId('expense'), title:get('name'), projectId:get('project'), category:get('category') as Expense['category'], amount:Number(get('amount')), date:get('date'), status:get('status') as Expense['status'] };
+    const currency=get('currency') as CurrencyUnit;
+    const amount=parseAmount(get('amount'),currency);
+    if(amount===undefined||amount<1){notice('مبلغ یا اعشار با ارز انتخابی سازگار نیست.');return;}
+    const expense: Expense = { id:initial?.id ?? newId('expense'), title:get('name'), projectId:get('project'), category:get('category') as Expense['category'], amount,currency,amountUnit:'minor', date:get('date'), status:get('status') as Expense['status'] };
     change(data => ({ ...data,expenses:initial ? data.expenses.map(e => e.id === initial.id ? expense : e) : [expense,...data.expenses] }),
       'هزینهٔ ذخیره شد.',{ projectId:expense.projectId, title:initial ? 'هزینه ویرایش شد' : 'هزینه ثبت شد',detail:expense.title,source:'مالی' });
     onClose();
@@ -27,7 +30,8 @@ function ExpenseForm({ onClose, initial, projectId }: { onClose: () => void; ini
     <ProjectField initial={initial?.projectId ?? projectId} />
     <div className="form-grid">
       <Field label="دسته‌بندی"><select name="category" defaultValue={initial?.category}><SelectOptions options={categories} /></select></Field>
-      <Field label="مبلغ (تومان)"><input dir="ltr" type="number" name="amount" min="1" step="1" max="999999999999" required defaultValue={initial?.amount} /></Field>
+      <Field label="واحد ارز"><select name="currency" defaultValue={initial?.currency??'TOMAN'}><option value="TOMAN">تومان</option><option value="IRR">ریال</option><option value="USD">دلار</option></select></Field>
+      <Field label="مبلغ"><input dir="ltr" name="amount" inputMode="decimal" maxLength={16} required defaultValue={initial?inputAmount(initial):undefined} /></Field>
       <Field label="تاریخ (میلادی)"><input dir="ltr" type="date" name="date" required defaultValue={initial?.date ?? today()} /></Field>
       <Field label="وضعیت پرداخت"><select name="status" defaultValue={initial?.status}><option value="upcoming">پیش رو</option><option value="paid">پرداخت‌شده</option></select></Field>
     </div>
@@ -40,6 +44,7 @@ export function Finance() {
   const [category,setCategory] = useState('');
   const [status,setStatus] = useState('');
   const [query,setQuery] = useState('');
+  const [chartCurrency,setChartCurrency]=useState<CurrencyUnit>('TOMAN');
   const [from,setFrom] = useState('');
   const [to,setTo] = useState('');
   const [show,setShow] = useState(false);
@@ -48,22 +53,23 @@ export function Finance() {
   const invalidRange = !!(from && to && from > to);
   const items = data.expenses.filter(e => (!projectScope || e.projectId === projectScope) && (!category || e.category === category) && (!status || e.status === status)
     && (!from || e.date >= from) && (!to || e.date <= to) && matches(query,e.title,e.category)).sort((a,b) => b.date.localeCompare(a.date));
-  const all = sum(items);
+  const chartItems=items.filter(item=>(item.currency??'TOMAN')===chartCurrency);
+  const chartValue=(value:bigint)=>Number(value)/(chartCurrency==='USD'?100:1);
   const monthTotals = new Map<string,number>();
-  [...items].reverse().forEach(e => {
+  [...chartItems].reverse().forEach(e => {
     const key = dateLabel(e.date,{month:'short',year:'2-digit'});
-    monthTotals.set(key,(monthTotals.get(key) ?? 0) + e.amount);
+    monthTotals.set(key,(monthTotals.get(key) ?? 0) + chartValue(minorUnits(e)));
   });
   const bars = Array.from(monthTotals, ([label,value]) => ({label,value})).slice(-12);
-  const split = categories.map(label => ({label,value:sum(items.filter(e => e.category === label))})).filter(e => e.value);
+  const split = categories.map(label => ({label,value:chartItems.filter(e=>e.category===label).reduce((total,e)=>total+chartValue(minorUnits(e)),0)})).filter(e => e.value);
 
   return <>
     <Heading title="هزینه‌ها و قراردادها" subtitle="ثبت هزینه‌های  زیرساخت، اشتراک‌ها و تمدید هر پروژه">
       <Button variant="primary" icon={Plus} onClick={() => setShow(true)}>هزینه جدید</Button>
     </Heading>
     <Metrics entries={[
-      {label:'مجموع هزینه‌های',value:money(all),note:'براساس فیلترهای جاری',icon:Wallet},
-      {label:'هزینه زیرساخت',value:money(sum(items.filter(e => e.category === 'زیرساخت'))),note:'سرورها و میزبانی',icon:Server},
+      {label:'مجموع هزینه‌های',value:summaryByCurrency(items),note:'براساس فیلترهای جاری',icon:Wallet},
+      {label:'هزینه زیرساخت',value:summaryByCurrency(items.filter(e=>e.category==='زیرساخت')),note:'سرورها و میزبانی',icon:Server},
       {label:'اشتراک‌ها',value:items.filter(e => e.category === 'اشتراک').length,note:'اقلام اشتراک',icon:CreditCard},
       {label:'پرداخت‌های پیش رو',value:items.filter(e => e.status === 'upcoming').length,note:'سررسیدهای',icon:CalendarDays},
     ]} />
@@ -71,6 +77,9 @@ export function Finance() {
     <div className="toolbar finance-filters"><SearchField label="جست‌وجوی هزینه" value={query} onChange={setQuery} /><ProjectFilter value={projectScope} onChange={setProjectScope} />
       <Filter label="دسته‌بندی هزینه" value={category} onChange={setCategory} options={[{value:'',label:'همه دسته‌ها'},...categories.map(value => ({value,label:value}))]} />
       <Filter label="وضعیت پرداخت" value={status} onChange={setStatus} options={[{value:'',label:'همه پرداخت‌ها'},{value:'paid',label:'پرداخت‌شده'},{value:'upcoming',label:'پیش رو'}]} />
+      <Field label="ارز نمودارها"><select value={chartCurrency} onChange={e=>setChartCurrency(e.target.value as CurrencyUnit)}>
+        <option value="TOMAN">تومان</option><option value="IRR">ریال</option><option value="USD">دلار</option>
+      </select></Field>
       <Field label="از تاریخ (میلادی)"><input type="date" value={from} onChange={e => setFrom(e.target.value)} dir="ltr" /></Field>
       <Field label="تا تاریخ (میلادی)"><input type="date" value={to} onChange={e => setTo(e.target.value)} dir="ltr" /></Field>
     </div>
@@ -79,33 +88,33 @@ export function Finance() {
         <Panel title="روند هزینه‌ها" action={<TextLink href="/reports">گزارش‌ها</TextLink>}>
           {bars.length ? <Bars entries={bars} label="مجموع هزینه‌های به تفکیک ماه" /> : <Empty title="داده‌ای در این بازه وجود ندارد" />}
         </Panel>
-        <Panel title="توزیع هزینه‌های">{all ? <Donut entries={split} display={money(all).replace(' تومان','')} /> : <Empty title="هزینه‌ای پیدا نشد" />}</Panel>
+        <Panel title="توزیع هزینه‌های">{split.length ? <Donut entries={split} display={summaryByCurrency(chartItems)} /> : <Empty title="هزینه‌ای پیدا نشد" />}</Panel>
       </div>
       <Panel title="اشتراک‌های دوره‌ای و موعد تمدید">
         <div className="flex justify-end"><Button onClick={()=>setNewFinance('charge')} icon={Plus}>ثبت اشتراک دوره‌ای</Button></div>
         {data.charges.length?<Table label="اشتراک‌های واقعی ثبت‌شده" rows={data.charges.filter(c=>!projectScope||c.projectId===projectScope)} columns={[
-          {label:'اشتراک',render:c=>c.title},{label:'دوره',render:c=>c.period},{label:'مبلغ',render:c=>moneyByUnit(c.amount,c.currency)},
+          {label:'اشتراک',render:c=>c.title},{label:'دوره',render:c=>c.period},{label:'مبلغ',render:c=>amountLabel(c)},
           {label:'تمدید بعدی',render:c=>dateLabel(c.nextDue)},{label:'وضعیت',render:c=><Pill tone={c.status==='active'?'good':'neutral'}>{c.status==='active'?'فعال':'متوقف'}</Pill>}
         ]}/>:<Empty title="اشتراک دوره‌ای ثبت نشده است" />}
       </Panel>
       <Panel title="قراردادهای پروژه">
         <div className="flex justify-end"><Button onClick={()=>setNewFinance('contract')} icon={Plus}>ثبت قرارداد</Button></div>
         {data.contracts.length?<Table label="قراردادها" rows={data.contracts.filter(c=>!projectScope||c.projectId===projectScope)} columns={[
-          {label:'قرارداد',render:c=>c.title},{label:'مشتری',render:c=>c.client},{label:'مبلغ',render:c=>moneyByUnit(c.amount,c.currency)},
+          {label:'قرارداد',render:c=>c.title},{label:'مشتری',render:c=>c.client},{label:'مبلغ',render:c=>amountLabel(c)},
           {label:'پایان',render:c=>dateLabel(c.end)},{label:'وضعیت',render:c=>c.state}
         ]}/>:<Empty title="قراردادی ثبت نشده است" />}
       </Panel>
       <Panel title="درآمدهای ثبت‌شده">
         <div className="flex justify-end"><Button onClick={()=>setNewFinance('revenue')} icon={Plus}>ثبت درآمد</Button></div>
         {data.revenues.length?<Table label="درآمدهای واقعی ثبت‌شده" rows={data.revenues.filter(c=>!projectScope||c.projectId===projectScope)} columns={[
-          {label:'شرح',render:c=>c.title},{label:'مبلغ',render:c=>moneyByUnit(c.amount,c.currency)},
+          {label:'شرح',render:c=>c.title},{label:'مبلغ',render:c=>amountLabel(c)},
           {label:'تاریخ',render:c=>dateLabel(c.date)},{label:'وضعیت',render:c=>c.status==='received'?'دریافت‌شده':'در انتظار'}
         ]}/>:<Empty title="درآمدی ثبت نشده است" />}
       </Panel>
       <Panel title="فهرست پرداخت‌ها و تمدیدها"><Table label="پرداخت‌های" rows={items} columns={[
         {label:'شرح',render:e => <button className="cell-link" type="button" onClick={() => setEdit(e)}>{e.title}</button>},
         {label:'پروژه',render:e => <bdi>{projectName(data,e.projectId)}</bdi>},
-        {label:'نوع',render:e => e.category}, {label:'مبلغ',render:e => money(e.amount)}, {label:'تاریخ',render:e => dateLabel(e.date)},
+        {label:'نوع',render:e => e.category}, {label:'مبلغ',render:e => amountLabel(e)}, {label:'تاریخ',render:e => dateLabel(e.date)},
         {label:'وضعیت',render:e => <Pill tone={e.status === 'paid' ? 'good' : 'warn'}>{e.status === 'paid' ? 'پرداخت‌شده' : 'پیش رو'}</Pill>},
       ]} /></Panel>
     </div>}
@@ -115,15 +124,15 @@ export function Finance() {
   </>;
 }
 
-const moneyByUnit=(amount:number,unit:CurrencyUnit)=>new Intl.NumberFormat('fa-IR').format(amount)+' '+({TOMAN:'تومان',IRR:'ریال',USD:'دلار'}[unit]);
 function AdditionalFinanceForm({kind,projectId,onClose}:{kind:'charge'|'contract'|'revenue';projectId:string;onClose:()=>void}){
   const {change,notice}=useDemo();
   const title={charge:'اشتراک دوره‌ای',contract:'قرارداد',revenue:'درآمد'}[kind];
   function submit(event:FormEvent<HTMLFormElement>){
     const get=formValues(event);
-    const amount=Number(get('amount'));
-    if(!Number.isSafeInteger(amount)||amount<0||amount>1e12){notice('مبلغ باید عدد صحیح و معتبر باشد.');return;}
-    const common={id:newId(kind),projectId:get('project'),title:get('title'),amount,currency:get('currency') as CurrencyUnit};
+    const currency=get('currency') as CurrencyUnit;
+    const amount=parseAmount(get('amount'),currency);
+    if(amount===undefined){notice('مبلغ باید عدد صحیح و معتبر باشد.');return;}
+    const common={id:newId(kind),projectId:get('project'),title:get('title'),amount,currency,amountUnit:'minor' as const};
     if(kind==='charge'){
       const charge:RecurringCharge={...common,provider:get('provider'),period:get('period') as RecurringCharge['period'],nextDue:get('nextDue'),status:'active'};
       change(prev=>({...prev,charges:[...prev.charges,charge]}),'اشتراک ثبت شد.',{projectId:charge.projectId,title:'ثبت اشتراک',source:'مالی'});
@@ -141,7 +150,7 @@ function AdditionalFinanceForm({kind,projectId,onClose}:{kind:'charge'|'contract
     <Field label="عنوان"><input name="title" maxLength={160} required /></Field>
     <ProjectField initial={projectId}/>
     <div className="form-grid">
-      <Field label="مبلغ صحیح"><input type="number" name="amount" min="0" max="1000000000000" step="1" required dir="ltr" /></Field>
+      <Field label="مبلغ (دلار تا دو رقم اعشار)"><input name="amount" maxLength={16} inputMode="decimal" required dir="ltr" /></Field>
       <Field label="واحد ارز"><select name="currency" defaultValue="TOMAN"><option value="TOMAN">تومان</option><option value="IRR">ریال</option><option value="USD">دلار</option></select></Field>
     </div>
     {kind==='charge'&&<><Field label="ارائه‌دهنده"><input name="provider" maxLength={120} required /></Field>
@@ -177,7 +186,7 @@ export function Reports() {
   function exportReport() {
     const rows: (string | number)[][] = [
       ['شاخص','مقدار'],['بازه',periods.find(p => p.value === range)?.label ?? ''],['پروژه‌های فعال',projects.length],
-      ['وظایف تکمیل‌شده (درصد)',rate],['منابع نیازمند بازبینی',missing.length],['هزینه (تومان)',sum(expenses)],
+      ['وظایف تکمیل‌شده (درصد)',rate],['منابع نیازمند بازبینی',missing.length],...Array.from(totalsByCurrency(expenses),([unit,minor])=>['هزینه در واحد پایه · '+unit,minor.toString()]),
       ...rates.map(({project,value}) => [`پوشش سند · ${project}`,value]),
     ];
     download('projectos-report.csv',csv(rows),'text/csv;charset=utf-8');
@@ -191,7 +200,7 @@ export function Reports() {
       <Metrics entries={[
         {label:'پروژه‌های فعال',value:projects.length,note:'در محدودهٔ پروژه',icon:FolderKanban},
         {label:'وظایف انجام‌شده',value:percent(rate),note:'بر اساس موعد در بازه',icon:CircleCheck},
-        {label:'هزینه‌های',value:money(sum(expenses)),note:'جمع بازه انتخابی',icon:ReceiptText},
+        {label:'هزینه‌های',value:summaryByCurrency(expenses),note:'جمع بازه انتخابی',icon:ReceiptText},
         {label:'منابع نیازمند بررسی',value:missing.length,note:'بررسی فراداده',icon:CircleAlert},
       ]} />
       <div className="control-group"><ProjectFilter value={projectScope} onChange={setProjectScope} /><Filter label="بازه گزارش" value={range} onChange={setRange} options={periods} /></div>

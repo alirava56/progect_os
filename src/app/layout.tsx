@@ -14,6 +14,6 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const user=await getCurrentAccount();
-  const state=user?loadState(user):{data:emptyData,version:0};
+  const state=user?await loadState(user):{data:emptyData,version:0};
   return <html lang="fa" dir="rtl"><body><DemoProvider initialData={state.data} initialVersion={state.version} authenticated={!!user}>{children}</DemoProvider></body></html>;
 }

@@ -11,7 +11,7 @@ export function JoinInvitation(){
     try{
       const res=await fetch('/api/auth/accept-invite',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if(!res.ok)throw Error('کد دعوت معتبر نیست، منقضی شده یا قبلاً استفاده شده است.');
-      router.replace('/dashboard');router.refresh();
+      router.replace((await res.json()).enrollmentRequired ? '/mfa-enroll' : '/dashboard');router.refresh();
     }catch(e){setError(e instanceof Error?e.message:'خطای ارتباطی');setBusy(false);}
   }
   return <main className="auth-layout"><section className="auth-form"><div className="auth-form-inner">

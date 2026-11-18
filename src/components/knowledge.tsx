@@ -98,6 +98,8 @@ type SourceCitation = {id:string;title:string;kind:string;href:string;updatedAt:
 type SearchExchange = {id:string;query:string;answer:string;citations:SourceCitation[];mode:'retrieval'|'llm';externalTransmission:boolean|null;caution?:string};
 const starterPrompts=['وظایف باز','مستندات پروژه','سرور و دامنه','تمدید'];
 export function Assistant(){
+  const {data,projectScope,setProjectScope}=useDemo();
+  const [allowExternal,setAllowExternal]=useState(false);
   const [query,setQuery]=useState('');
   const [exchanges,setExchanges]=useState<SearchExchange[]>([]);
   const [busy,setBusy]=useState(false);
@@ -107,12 +109,12 @@ export function Assistant(){
     setBusy(true);setError('');
     try{
       const response=await fetch('/api/assistant',{method:'POST',credentials:'same-origin',cache:'no-store',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({question:value})});
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({question:value,projectId:projectScope||undefined,allowExternal})});
       const result=await response.json();
       if(!response.ok)throw Error(result.error||'جست‌وجو ناموفق بود');
       setExchanges(previous=>[{id:newId('search'),query:value,answer:result.answer,citations:result.citations||[],
         mode:result.mode,externalTransmission:result.externalTransmission??null,caution:result.caution},...previous]);
-      setQuery('');
+      setQuery('');setAllowExternal(false);
     }catch(e){setError(e instanceof Error?e.message:'خطای جست‌وجو');}
     finally{setBusy(false);}
   }
@@ -136,6 +138,14 @@ export function Assistant(){
           </div>):<Empty title="پرسش خود را وارد کنید" detail="پاسخ فقط از منابع قابل دسترس Workspace استخراج می‌شود. اطلاعات محرمانه را وارد نکنید."/>}
           {busy&&<p className="muted" role="status">در حال بررسی منابع…</p>}
           {error&&<p className="form-error" role="alert">{error}</p>}
+        </div>
+        <div className="toolbar">
+          <Field label="پروژهٔ جست‌وجو"><select value={projectScope} onChange={event=>{setProjectScope(event.currentTarget.value);setAllowExternal(false);}}>
+            <option value="">همهٔ پروژه‌های مجاز</option>
+            {data.projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}
+          </select></Field>
+          {data.users[0]?.role==='Owner'&&projectScope&&<label><input type="checkbox" checked={allowExternal}
+            onChange={event=>setAllowExternal(event.currentTarget.checked)} /> اجازهٔ ارسال پرسش و گزیدهٔ منابع این پروژه برای همین پاسخ</label>}
         </div>
         <form className="chat-form" onSubmit={event=>{event.preventDefault();void send(query);}}>
           <input aria-label="جست‌وجو در دانش" dir="auto" placeholder="مثلاً: تصمیم‌های اخیر، سررسیدها یا وضعیت پروژه…" value={query} onChange={e=>setQuery(e.target.value)} maxLength={400}/>
