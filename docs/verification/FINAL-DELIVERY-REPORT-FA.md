@@ -6,9 +6,10 @@
 |---|---|---|
 | ساخت و ویرایش پروژه، ثبت VPS، دو دامنه، دیتابیس، دو وظیفه و Runbook از رابط فارسی | `IMPLEMENTED_AND_VERIFIED` | `npm run test:project-lifecycle`، هر سه پروژهٔ آزمایشی NovaGuard، باشگاه و MOKMOK موفق در Chrome و PostgreSQL 17.12 محلی. مرورگر تازه پس از Restart و ورود مجدد، داده‌ها و ارتباط والد دیتابیس را نشان داد. |
 | بایگانی با تأیید سرور و حذف از صفحهٔ پروژه | `IMPLEMENTED_AND_VERIFIED` | `npm run test:smoke`، Chrome با ۱۶ نتیجهٔ موفق. حذف پروژهٔ خالی بایگانی‌شده موفق بود. درخواست حذف پروژهٔ دارای منبع مشترک رد شد و هر دو رکورد باقی ماندند. |
-| پذیرش کل فاز ۱ | `PARTIAL` | باقیمانده شامل اتصال هزینهٔ تمدید به منابع از UI، مرتب‌سازی فهرست‌ها و اجرای مجموعه‌های تاریخی است. |
+| هزینهٔ تمدید منبع مشترک و مرتب‌سازی منابع بر اساس نام یا موعد تمدید | `IMPLEMENTED_AND_VERIFIED` | ثبت ۱۲٫۵۰ دلار با مقدار دقیق ۱۲۵۰ سنت، بازیابی خطای فرم و رد ارجاع نامعتبر در هر دو API نوشتن. بعد از لغو اشتراک‌گذاری، عضو محدود هزینه را می‌بیند و شناسهٔ منبع در پاسخ حذف می‌شود. |
+| پذیرش کل فاز ۱ | `PARTIAL` | سناریوهای اصلی ماندگاری و روال‌های جدید سبز هستند. تکمیل پوشش مجموعه‌های تاریخی و یکپارچگی همهٔ فرم‌ها باز است. |
 
-`npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون محلی `test:postgres` موفق بودند. در [CI نسخهٔ مبنا](https://github.com/alirava56/progect_os/actions/runs/44632719901)، Windows، Ubuntu و CodeQL موفق بودند و بازیابی PostgreSQL 16 خطا داد. وضعیت انتشار همچنان **NO-GO** است. جدول و لاگ‌های زیر سند اجرای ۱۹ نوامبر هستند.
+`npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ Smoke گسترش‌یافته در Chrome و Firefox هرکدام ۱۸ نتیجهٔ موفق داشت. اجرای [CI نسخهٔ مبنا](https://github.com/alirava56/progect_os/actions/runs/44632719901) در بازیابی PostgreSQL 16 خطا داد. [اجرای بعدی فاز ۱](https://github.com/alirava56/progect_os/actions/runs/44634151927) در Windows، Ubuntu، CodeQL و آزمایش‌های PostgreSQL موفق بود. وضعیت انتشار همچنان **NO-GO** است. جدول زیر سند اجرای ۱۹ نوامبر است.
 
 **حکم انتشار Production: NO-GO**
 

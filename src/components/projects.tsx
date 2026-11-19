@@ -4,7 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Activity, Archive, ArrowUpLeft, Bell, Check, CircleAlert, Clock3, FolderKanban, FolderOpen, Grid2X2, List, ListTodo, Pencil, Plus, Server, ShieldCheck, Trash2 } from 'lucide-react';
-import { dateLabel, docHref, matches, number, percent, projectHref, serverHref, taskHref, money } from '@/lib/format';
+import { dateLabel, docHref, matches, number, percent, projectHref, resourceHref, taskHref } from '@/lib/format';
+import { amountLabel } from '@/lib/money';
 import { choices, priorities, priorityTones, projectStatuses, projectTones, resourceStatuses, resourceTones, taskStatuses, taskTones } from '@/lib/labels';
 import { useDemo } from '@/lib/store';
 import type { Project, Resource, Task } from '@/lib/types';
@@ -124,7 +125,7 @@ function ProjectTaskRows({ tasks }: { tasks: Task[] }) {
 function ProjectResourceRows({ resources }: { resources: Resource[] }) {
   if (!resources.length) return <Empty title="منبعی به این پروژه متصل نشده است" />;
   return resources.map(r => <Row key={r.id} icon={Server} title={<bdi>{r.name}</bdi>} meta={<bdi dir="ltr">{r.address}</bdi>}
-    href={r.type === 'server' ? serverHref(r.id) : `/infrastructure?resource=${r.id}`} end={<Pill tone={resourceTones[r.status]}>{resourceStatuses[r.status]}</Pill>} />);
+    href={resourceHref(r)} end={<Pill tone={resourceTones[r.status]}>{resourceStatuses[r.status]}</Pill>} />);
 }
 export function ProjectDetails({ id }: { id: string }) {
   const { data, change, saving, projectScope, setProjectScope } = useDemo();
@@ -214,7 +215,7 @@ export function ProjectDetails({ id }: { id: string }) {
       {tab === 'docs' && <Panel title="مستندات پروژه" action={canContribute && <Button icon={Plus} onClick={() => setModal('doc')}>سند جدید</Button>}>{docs.length ? docs.map(d => <Row key={d.id} icon={FolderOpen} title={d.title} href={docHref(d.id)} end={<Pill>{d.type}</Pill>} />) : <Empty title="سندی ثبت نشده است" />}</Panel>}
       {tab === 'activity' && <Panel title="تاریخچه پروژه">{events.length ? events.map(e => <Row key={e.id} icon={Activity} title={e.title} meta={`${e.actor} · ${e.source} · ${dateLabel(e.date)}`} end={undefined} />) : <Empty title="رویدادی ثبت نشده است" />}</Panel>}
       {tab === 'finance' && <Panel title="هزینه‌های پروژه"><Table label="هزینه‌های پروژه" rows={expenses} columns={[
-        {label:'شرح',render:e => e.title}, {label:'مبلغ',render:e => money(e.amount)}, {label:'تاریخ',render:e => dateLabel(e.date)}, {label:'دسترسی',render:() => visibleLink('/finance','همه هزینه‌ها')},
+        {label:'شرح',render:e => e.title}, {label:'مبلغ',render:e => amountLabel(e)}, {label:'تاریخ',render:e => dateLabel(e.date)}, {label:'دسترسی',render:() => visibleLink('/finance','همه هزینه‌ها')},
       ]} /></Panel>}
       {isOwner && <div className="flex flex-wrap gap-2">
         <Button variant={archived ? 'soft' : 'danger'} icon={Archive} onClick={() => setModal('archive')}>{archived ? 'بازگردانی پروژه' : 'بایگانی پروژه'}</Button>

@@ -55,19 +55,7 @@ jobs:
           cache: npm
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npm ci --include=optional
-      - name: Test migration and restore with disposable PostgreSQL
-        run: |
-          pg_tools="$(mktemp -d)"
-          ln -s "$PROJECTOS_PG_BIN/pg_dump" "$pg_tools/pg_dump"
-          cat > "$pg_tools/pg_restore" <<'EOF'
-          #!/bin/bash
-          exec /usr/lib/postgresql/16/bin/pg_restore "$@" 2>> "$RUNNER_TEMP/projectos-restore-fixture.log"
-          EOF
-          chmod +x "$pg_tools/pg_restore"
-          if ! PROJECTOS_PG_BIN="$pg_tools" npm run test:postgres; then
-            test ! -f "$RUNNER_TEMP/projectos-restore-fixture.log" || head -n 12 "$RUNNER_TEMP/projectos-restore-fixture.log"
-            exit 1
-          fi
+      - run: npm run test:postgres
       - run: npm run build
       - run: npm run test:postgres-http
       - run: npx playwright install --with-deps chromium

@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { getDb, lockWorkspace, readTransaction, sql, transaction, type SqlExecutor } from '../../../scripts/database.mjs';
 import { emptyData } from '../empty-data';
 import { isRecordKind, recordKinds, type RecordKind, type WorkspaceRecord } from '../record-contract';
-import type { ActivityEvent, DemoData, Preferences } from '../types';
+import type { ActivityEvent, DemoData, Preferences, RecurringCharge, Resource } from '../types';
 import { redactStoredValue, redactCredentials } from './credential-guard';
 import { ValidationError, type CanonicalState } from './validation';
 
@@ -210,6 +210,7 @@ export async function persistChanges(
   const now = new Date().toISOString();
   const { workspaceId } = account;
   if (changes.length > 100) throw new ValidationError('Too many record changes');
+  const resourceChanges = new Map(changes.filter(change => change.kind === 'resources').map(change => [change.id, change]));
   for (const change of changes) {
     const { kind, id, record, previous } = change;
     const before = previous ? JSON.parse(previous.payload) as WorkspaceRecord : undefined;
@@ -236,6 +237,18 @@ export async function persistChanges(
       if (proposed.lastCheckedAt !== current?.lastCheckedAt
         || (current?.lastCheckedAt && proposed.externalRef !== current.externalRef)) {
         throw new ForbiddenError();
+      }
+    }
+    if (kind === 'charges' && record) {
+      const charge = record as RecurringCharge;
+      const prior = before as RecurringCharge | undefined;
+      if (charge.linkedResourceId && (charge.linkedResourceId !== prior?.linkedResourceId || charge.projectId !== prior?.projectId)) {
+        const pending = resourceChanges.get(charge.linkedResourceId);
+        const stored = pending ? undefined : await storedRecord(db, workspaceId, 'resources', charge.linkedResourceId);
+        const resource = (pending?.record as Resource | undefined) ?? (stored ? JSON.parse(stored.payload) as Resource : undefined);
+        if (!resource || (resource.projectId !== charge.projectId && !resource.linkedProjectIds?.includes(charge.projectId))) {
+          throw new ValidationError('Charge resource must belong to or be shared with the charge project');
+        }
       }
     }
     if (record && !before && (kind === 'projects' || kind === 'docs')) {

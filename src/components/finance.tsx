@@ -3,7 +3,7 @@ import { amountLabel, inputAmount, minorUnits, parseAmount, summaryByCurrency, t
 
 import { useState, type FormEvent } from 'react';
 import { CalendarDays, ChartNoAxesCombined, CircleAlert, CircleCheck, CreditCard, Download, FileText, FolderKanban, Layers, Plus, ReceiptText, Server, Wallet } from 'lucide-react';
-import { csv, dateLabel, download, matches, newId, percent, today } from '@/lib/format';
+import { csv, dateLabel, download, matches, newId, percent, resourceHref, today } from '@/lib/format';
 import { useDemo } from '@/lib/store';
 import type { Expense, RecurringCharge, ContractRecord, RevenueEntry, CurrencyUnit } from '@/lib/types';
 import { Bars, Donut, Trend } from './charts';
@@ -13,16 +13,19 @@ import { Button, Callout, Empty, Field, Filter, FormActions, Heading, Metrics, M
 const categories: Expense['category'][] = ['زیرساخت','دامنه','پشتیبان‌گیری','اشتراک'];
 
 function ExpenseForm({ onClose, initial, projectId }: { onClose: () => void; initial?: Expense; projectId: string }) {
-  const { change, notice } = useDemo();
-  function submit(event: FormEvent<HTMLFormElement>) {
+  const { change, saving } = useDemo();
+  const [error, setError] = useState('');
+  async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
-    if (!get('name')) { notice('شرح هزینه را وارد کنید.'); return; }
+    if (!get('name')) { setError('شرح هزینه را وارد کنید.'); return; }
     const currency=get('currency') as CurrencyUnit;
     const amount=parseAmount(get('amount'),currency);
-    if(amount===undefined||amount<1){notice('مبلغ یا اعشار با ارز انتخابی سازگار نیست.');return;}
+    if(amount===undefined||amount<1){setError('مبلغ یا اعشار با ارز انتخابی سازگار نیست.');return;}
     const expense: Expense = { id:initial?.id ?? newId('expense'), title:get('name'), projectId:get('project'), category:get('category') as Expense['category'], amount,currency,amountUnit:'minor', date:get('date'), status:get('status') as Expense['status'] };
-    change(data => ({ ...data,expenses:initial ? data.expenses.map(e => e.id === initial.id ? expense : e) : [expense,...data.expenses] }),
-      'هزینهٔ ذخیره شد.',{ projectId:expense.projectId, title:initial ? 'هزینه ویرایش شد' : 'هزینه ثبت شد',detail:expense.title,source:'مالی' });
+    setError('');
+    const saved = await change(data => ({ ...data,expenses:initial ? data.expenses.map(e => e.id === initial.id ? expense : e) : [expense,...data.expenses] }),
+      'هزینه ذخیره شد.',{ projectId:expense.projectId, title:initial ? 'هزینه ویرایش شد' : 'هزینه ثبت شد',detail:expense.title,source:'مالی' });
+    if (!saved) { setError('ذخیرهٔ هزینه تأیید نشد.'); return; }
     onClose();
   }
   return <Modal title={initial ? 'ویرایش هزینهٔ' : 'هزینه جدید'} onClose={onClose}><form className="form-stack" onSubmit={submit}>
@@ -35,7 +38,8 @@ function ExpenseForm({ onClose, initial, projectId }: { onClose: () => void; ini
       <Field label="تاریخ (میلادی)"><input dir="ltr" type="date" name="date" required defaultValue={initial?.date ?? today()} /></Field>
       <Field label="وضعیت پرداخت"><select name="status" defaultValue={initial?.status}><option value="upcoming">پیش رو</option><option value="paid">پرداخت‌شده</option></select></Field>
     </div>
-    <FormActions onClose={onClose} submit="ذخیره هزینه" />
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <FormActions onClose={onClose} saving={saving} submit="ذخیره هزینه" />
   </form></Modal>;
 }
 
@@ -94,6 +98,10 @@ export function Finance() {
         <div className="flex justify-end"><Button onClick={()=>setNewFinance('charge')} icon={Plus}>ثبت اشتراک دوره‌ای</Button></div>
         {data.charges.length?<Table label="اشتراک‌های واقعی ثبت‌شده" rows={data.charges.filter(c=>!projectScope||c.projectId===projectScope)} columns={[
           {label:'اشتراک',render:c=>c.title},{label:'دوره',render:c=>c.period},{label:'مبلغ',render:c=>amountLabel(c)},
+          {label:'منبع',render:c=>{
+            const resource = data.resources.find(resource => resource.id === c.linkedResourceId);
+            return resource ? <TextLink href={resourceHref(resource)}>{resource.name}</TextLink> : '—';
+          }},
           {label:'تمدید بعدی',render:c=>dateLabel(c.nextDue)},{label:'وضعیت',render:c=><Pill tone={c.status==='active'?'good':'neutral'}>{c.status==='active'?'فعال':'متوقف'}</Pill>}
         ]}/>:<Empty title="اشتراک دوره‌ای ثبت نشده است" />}
       </Panel>
@@ -125,35 +133,48 @@ export function Finance() {
 }
 
 function AdditionalFinanceForm({kind,projectId,onClose}:{kind:'charge'|'contract'|'revenue';projectId:string;onClose:()=>void}){
-  const {change,notice}=useDemo();
+  const {data,change,saving}=useDemo();
+  const [selectedProject,setSelectedProject]=useState(projectId);
+  const [error,setError]=useState('');
   const title={charge:'اشتراک دوره‌ای',contract:'قرارداد',revenue:'درآمد'}[kind];
-  function submit(event:FormEvent<HTMLFormElement>){
+  const resources = kind === 'charge' && selectedProject
+    ? data.resources.filter(resource => resource.projectId === selectedProject || resource.linkedProjectIds?.includes(selectedProject))
+    : [];
+  async function submit(event:FormEvent<HTMLFormElement>){
     const get=formValues(event);
     const currency=get('currency') as CurrencyUnit;
     const amount=parseAmount(get('amount'),currency);
-    if(amount===undefined){notice('مبلغ باید عدد صحیح و معتبر باشد.');return;}
+    if(amount===undefined){setError('مبلغ یا اعشار با ارز انتخابی سازگار نیست.');return;}
+    if(kind==='contract'&&get('end')<get('start')){setError('تاریخ پایان قرارداد نمی‌تواند پیش از شروع باشد.');return;}
+    setError('');
     const common={id:newId(kind),projectId:get('project'),title:get('title'),amount,currency,amountUnit:'minor' as const};
+    let saved: boolean;
     if(kind==='charge'){
-      const charge:RecurringCharge={...common,provider:get('provider'),period:get('period') as RecurringCharge['period'],nextDue:get('nextDue'),status:'active'};
-      change(prev=>({...prev,charges:[...prev.charges,charge]}),'اشتراک ثبت شد.',{projectId:charge.projectId,title:'ثبت اشتراک',source:'مالی'});
+      const charge:RecurringCharge={...common,provider:get('provider'),period:get('period') as RecurringCharge['period'],
+        nextDue:get('nextDue'),status:'active',linkedResourceId:get('resource') || undefined};
+      saved = await change(prev=>({...prev,charges:[...prev.charges,charge]}),'اشتراک ثبت شد.',{projectId:charge.projectId,title:'ثبت اشتراک',source:'مالی'});
     }else if(kind==='contract'){
-      if(get('end')<get('start')){notice('تاریخ پایان قرارداد نمی‌تواند پیش از شروع باشد.');return;}
       const contract:ContractRecord={...common,client:get('client'),start:get('start'),end:get('end'),state:'active'};
-      change(prev=>({...prev,contracts:[...prev.contracts,contract]}),'قرارداد ثبت شد.',{projectId:contract.projectId,title:'ثبت قرارداد',source:'مالی'});
+      saved = await change(prev=>({...prev,contracts:[...prev.contracts,contract]}),'قرارداد ثبت شد.',{projectId:contract.projectId,title:'ثبت قرارداد',source:'مالی'});
     }else{
       const revenue:RevenueEntry={...common,date:get('date'),status:get('status') as RevenueEntry['status']};
-      change(prev=>({...prev,revenues:[...prev.revenues,revenue]}),'درآمد ثبت شد.',{projectId:revenue.projectId,title:'ثبت درآمد',source:'مالی'});
+      saved = await change(prev=>({...prev,revenues:[...prev.revenues,revenue]}),'درآمد ثبت شد.',{projectId:revenue.projectId,title:'ثبت درآمد',source:'مالی'});
     }
+    if (!saved) { setError('ثبت اطلاعات مالی تأیید نشد.'); return; }
     onClose();
   }
   return <Modal title={`ثبت ${title}`} onClose={onClose}><form onSubmit={submit} className="form-stack">
     <Field label="عنوان"><input name="title" maxLength={160} required /></Field>
-    <ProjectField initial={projectId}/>
+    <ProjectField initial={projectId} onChange={setSelectedProject}/>
     <div className="form-grid">
       <Field label="مبلغ (دلار تا دو رقم اعشار)"><input name="amount" maxLength={16} inputMode="decimal" required dir="ltr" /></Field>
       <Field label="واحد ارز"><select name="currency" defaultValue="TOMAN"><option value="TOMAN">تومان</option><option value="IRR">ریال</option><option value="USD">دلار</option></select></Field>
     </div>
     {kind==='charge'&&<><Field label="ارائه‌دهنده"><input name="provider" maxLength={120} required /></Field>
+      <Field label="منبع مرتبط"><select key={selectedProject} name="resource">
+        <option value="">بدون منبع مرتبط</option>
+        {resources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
+      </select></Field>
       <Field label="دوره پرداخت"><select name="period"><option value="monthly">ماهانه</option><option value="quarterly">سه‌ماهه</option><option value="yearly">سالانه</option></select></Field>
       <Field label="موعد بعدی (میلادی)"><input type="date" name="nextDue" defaultValue={today()} required dir="ltr" /></Field></>}
     {kind==='contract'&&<><Field label="نام مشتری"><input name="client" maxLength={160} required /></Field>
@@ -162,7 +183,8 @@ function AdditionalFinanceForm({kind,projectId,onClose}:{kind:'charge'|'contract
     {kind==='revenue'&&<><Field label="تاریخ (میلادی)"><input name="date" type="date" defaultValue={today()} dir="ltr" required /></Field>
       <Field label="وضعیت"><select name="status"><option value="received">دریافت‌شده</option><option value="outstanding">در انتظار</option></select></Field></>}
     <Callout>اطلاعات مالی فقط به‌صورت دستی ثبت می‌شود. نرخ تبدیل ارز، فاکتور رسمی و تأیید بانکی هنوز متصل نیستند.</Callout>
-    <FormActions onClose={onClose} submit={`ثبت ${title}`} />
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <FormActions onClose={onClose} saving={saving} submit={`ثبت ${title}`} />
   </form></Modal>;
 }
 

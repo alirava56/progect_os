@@ -24,9 +24,9 @@ export function SelectOptions({ options }: { options: ReadonlyArray<string | Cho
     return <option key={value} value={value}>{label}</option>;
   })}</>;
 }
-export function ProjectField({ initial, all = false }: { initial?: string; all?: boolean }) {
+export function ProjectField({ initial, all = false, onChange }: { initial?: string; all?: boolean; onChange?: (id: string) => void }) {
   const { data } = useDemo();
-  return <Field label="پروژه"><select name="project" defaultValue={initial ?? ''} required={!all}>
+  return <Field label="پروژه"><select name="project" defaultValue={initial ?? ''} required={!all} onChange={event => onChange?.(event.target.value)}>
     <option value="">{all ? 'همه پروژه‌ها' : 'انتخاب پروژه'}</option>
     <SelectOptions options={data.projects.filter(p => p.status !== 'archived' || p.id === initial).map(p => ({ value:p.id, label:p.name }))} />
   </select></Field>;

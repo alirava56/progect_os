@@ -1,3 +1,5 @@
+import type { Resource } from './types';
+
 export const number = (value: number) => new Intl.NumberFormat('fa-IR').format(value);
 export const metricNumber = (value: number) => new Intl.NumberFormat('fa-IR', { minimumIntegerDigits: 2 }).format(value);
 export const money = (value: number) => `${number(value)} تومان`;
@@ -20,6 +22,8 @@ export const matches = (query: string, ...fields: string[]) => normalized(query)
 export const projectHref = (id: string) => `/projects/${encodeURIComponent(id)}`;
 export const taskHref = (id: string) => `/tasks/${encodeURIComponent(id)}`;
 export const serverHref = (id: string) => `/infrastructure/servers/${encodeURIComponent(id)}`;
+export const resourceHref = ({ id, type }: Pick<Resource, 'id' | 'type'>) =>
+  type === 'server' ? serverHref(id) : `/infrastructure?resource=${encodeURIComponent(id)}`;
 export const docHref = (id: string) => `/docs?doc=${encodeURIComponent(id)}`;
 
 export function download(name: string, content: string, type: string) {

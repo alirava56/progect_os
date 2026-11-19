@@ -4,7 +4,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArchiveRestore, CircleAlert, Clock3, Cpu, Database, FileText, Globe2, HardDrive, KeyRound, MemoryStick, Network, Pencil, Plus, Server, ShieldCheck } from 'lucide-react';
-import { dateLabel, docHref, matches, newId, number, projectHref, serverHref } from '@/lib/format';
+import { dateLabel, docHref, matches, newId, number, projectHref, resourceHref } from '@/lib/format';
+import { amountLabel } from '@/lib/money';
 import { choices, resourceStatuses, resourceTones, resourceTypes } from '@/lib/labels';
 import { useDemo } from '@/lib/store';
 import type { Resource, SecretReference } from '@/lib/types';
@@ -17,11 +18,13 @@ const resourceArt = { server:'infrastructure/server-rack',domain:'infrastructure
 const resourceTabs = [
   {value:'all',label:'همه منابع'}, {value:'server',label:'سرورها'}, {value:'domain',label:'دامنه‌ها'}, {value:'database',label:'دیتابیس‌ها'}, {value:'service',label:'سرویس‌ها'},
 ] as const;
-const resourceLink = (r: Resource) => r.type === 'server' ? serverHref(r.id) : `/infrastructure?resource=${encodeURIComponent(r.id)}`;
+const resourceCollator = new Intl.Collator('fa-IR', {numeric:true});
+const renewalTime = (resource: Resource) => resource.expires ? Date.parse(resource.expires) : Infinity;
 
 function ResourceMeta({ resource }: { resource: Resource }) {
   const { data } = useDemo();
   const parent = data.resources.find(item => item.id === resource.parentId);
+  const renewals = data.charges.filter(charge => charge.linkedResourceId === resource.id);
   const items = [
     {label:'نام منبع',value:<bdi>{resource.name}</bdi>},
     {label:'آدرس ثبت‌شده',value:<bdi dir="ltr" className="mono">{resource.address}</bdi>},
@@ -34,9 +37,11 @@ function ResourceMeta({ resource }: { resource: Resource }) {
     ] : []),
     ...(resource.type !== 'server' && resource.port !== undefined
       ? [{label:'پورت سرویس',value:<bdi dir="ltr" className="mono">{resource.port}</bdi>}] : []),
-    ...(parent ? [{label:'منبع والد',value:<Link className="cell-link" href={resourceLink(parent)}><bdi>{parent.name}</bdi></Link>}] : []),
+    ...(parent ? [{label:'منبع والد',value:<Link className="cell-link" href={resourceHref(parent)}><bdi>{parent.name}</bdi></Link>}] : []),
     {label:'پروژه مرتبط',value:<Link className="cell-link" href={projectHref(resource.projectId)}><bdi>{projectName(data,resource.projectId)}</bdi></Link>},
     {label:'تاریخ تمدید',value:resource.expires ? dateLabel(resource.expires,{day:'numeric',month:'long',year:'numeric'}) : <span className="ink-warn">ثبت نشده</span>},
+    ...(renewals.length ? [{label:'هزینه‌های دوره‌ای',value:<ul>{renewals.map(charge =>
+      <li key={charge.id}>{charge.title} · {amountLabel(charge)} · {dateLabel(charge.nextDue)}</li>)}</ul>}] : []),
     {label:'برچسب‌ها',value:resource.tags.length ? resource.tags.map(tag => <Pill key={tag}><bdi>{tag}</bdi></Pill>) : '—'},
   ];
   return <dl className="form-grid key-values">{items.map(({label,value}) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
@@ -51,11 +56,14 @@ export function Infrastructure() {
   const [environment, setEnvironment] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [status, setStatus] = useState('');
+  const [sort, setSort] = useState('');
   const params = useSearchParams();
   const router = useRouter();
   const active = data.resources.find(r => r.type !== 'server' && r.id === params.get('resource'));
   const scoped = data.resources.filter(r => !projectScope || r.projectId === projectScope || r.linkedProjectIds?.includes(projectScope));
   const items = scoped.filter(r => (kind === 'all' || r.type === kind) && (!environment || r.environment === environment) && (!status || r.status === status) && matches(query,r.name,r.address,r.provider,...r.tags));
+  if (sort === 'name') items.sort((a,b) => resourceCollator.compare(a.name,b.name));
+  if (sort === 'renewal') items.sort((a,b) => renewalTime(a) - renewalTime(b) || resourceCollator.compare(a.name,b.name));
 
   return <>
     <Heading title="زیرساخت و سرویس‌ها" subtitle="همه سرورها، دامنه‌ها، پایگاه‌های داده و سرویس‌های متصل">
@@ -72,16 +80,18 @@ export function Infrastructure() {
       <ProjectFilter value={projectScope} onChange={setProjectScope} />
       <Filter label="فیلتر محیط" value={environment} onChange={setEnvironment} options={[{value:'',label:'همه محیط‌ها'},...['Production','Staging','Development'].map(value => ({ value,label:value }))]} />
       <Filter label="فیلتر وضعیت منبع" value={status} onChange={setStatus} options={[{value:'',label:'همه وضعیت‌ها'},...choices(resourceStatuses)]} />
+      <Filter label="مرتب‌سازی منابع" value={sort} onChange={setSort}
+        options={[{value:'',label:'ترتیب ثبت'}, {value:'name',label:'نام منبع'}, {value:'renewal',label:'نزدیک‌ترین تمدید'}]} />
     </div>
     <div className="stack">
       <Panel className="inventory-table"><Table compact label="منابع زیرساخت" rows={expanded ? items : items.slice(0,6)} columns={[
-        {label:'نام منبع',render:r => <Link className="cell-identity" href={resourceLink(r)}><Glyph icon={resourceIcons[r.type]} /><span><strong dir="auto">{r.name}</strong><small className="inventory-mobile-type">{resourceTypes[r.type]}</small></span></Link>},
+        {label:'نام منبع',render:r => <Link className="cell-identity" href={resourceHref(r)}><Glyph icon={resourceIcons[r.type]} /><span><strong dir="auto">{r.name}</strong><small className="inventory-mobile-type">{resourceTypes[r.type]}</small></span></Link>},
         {label:'پروژه',render:r => <bdi>{projectName(data,r.projectId)}</bdi>},
         {label:'نوع',extra:true,render:r => resourceTypes[r.type]},
         {label:'آدرس ثبت‌شده',render:r => <bdi dir="ltr" className="mono">{r.address}</bdi>},
         {label:'محیط',extra:true,render:r => <bdi>{r.environment}</bdi>},
         {label:'وضعیت',extra:true,render:r => <Pill tone={resourceTones[r.status]}>{resourceStatuses[r.status]}</Pill>},
-        {label:'جزئیات',extra:true,render:r => <TextLink href={resourceLink(r)}>مشاهده</TextLink>},
+        {label:'جزئیات',extra:true,render:r => <TextLink href={resourceHref(r)}>مشاهده</TextLink>},
       ]} />
         {items.length > 6 && <div className="table-actions"><span className="muted">{number(expanded ? items.length : 6)} از {number(items.length)} منبع</span>
           <Button variant="ghost" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'نمایش کمتر' : 'نمایش منابع بیشتر'}</Button>
@@ -91,7 +101,7 @@ export function Infrastructure() {
         <Panel title="اطلاعات ناقص" action={<TextLink href="/alerts">مشاهده هشدارها</TextLink>}>
           {scoped.filter(r => r.status === 'missing' || (r.type === 'server' && !r.expires)).map(r => <Row key={r.id} icon={CircleAlert}
             title={r.type === 'server' && !r.expires ? 'تاریخ تمدید سرور مشخص نیست' : 'اطلاعات منبع نیاز به تکمیل دارد'}
-            meta={<bdi>{r.name}</bdi>} end={<Pill tone="warn">ناقص</Pill>} href={resourceLink(r)} />)}
+            meta={<bdi>{r.name}</bdi>} end={<Pill tone="warn">ناقص</Pill>} href={resourceHref(r)} />)}
           {!scoped.some(r => r.status === 'missing' || (r.type === 'server' && !r.expires)) && <Empty title="اطلاعات ناقصی پیدا نشد" />}
         </Panel>
         <Panel title="نمای پروژه‌ها" action={<TextLink href="/projects">مشاهده پروژه‌ها</TextLink>}>
@@ -176,7 +186,7 @@ export function ServerDetails({ id }: { id: string }) {
         </Panel>
         <div className="stack">
           <Panel title="سرویس‌های مرتبط" action={<TextLink href="/infrastructure">زیرساخت</TextLink>}>
-            {related.length ? related.map(r => <Row key={r.id} icon={resourceIcons[r.type]} title={<bdi>{r.name}</bdi>} meta={<bdi>{r.provider}</bdi>} href={resourceLink(r)} end={<Pill tone={resourceTones[r.status]}>{resourceStatuses[r.status]}</Pill>} />) : <Empty title="سرویس مرتبط ثبت نشده است" />}
+            {related.length ? related.map(r => <Row key={r.id} icon={resourceIcons[r.type]} title={<bdi>{r.name}</bdi>} meta={<bdi>{r.provider}</bdi>} href={resourceHref(r)} end={<Pill tone={resourceTones[r.status]}>{resourceStatuses[r.status]}</Pill>} />) : <Empty title="سرویس مرتبط ثبت نشده است" />}
           </Panel>
           <Panel title="پشتیبان و راهنماها">
             <Row icon={HardDrive} title="آخرین بازیابی" meta="تأیید نشده" end={<Pill tone="warn">نیازمند بررسی</Pill>} />

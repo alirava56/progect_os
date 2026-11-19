@@ -16,7 +16,7 @@ function task(id:string, projectId:string) {
 function doc(id:string,projectId:string,title:string) {
   return {id,projectId,title,type:'Runbook',body:'داشبورد و راهنمای مصنوعی',revision:1,updated:'2026-11-18'};
 }
-function create(kind:string,record:{id:string}) { return {kind,id:record.id,action:'create',record}; }
+function create<T extends {id:string}>(kind:string,record:T) { return {kind,id:record.id,action:'create',record}; }
 
 async function bootstrap(context:APIRequestContext,origin:Origin) {
   const response=await context.post('/api/auth/setup',{headers:origin,data:{
@@ -204,4 +204,96 @@ test('only an empty archived project can be deleted from its page', async ({page
       expect((await page.request.get('/api/records/projects/empty')).status()).toBe(404);
     }
   }
+});
+
+test('a resource renewal charge retains its currency and links after a rejected write and retry', async ({page, origin}) => {
+  await bootstrap(page.request, origin);
+  const domain = {id:'domain', name:'Domain renewal fixture', projectId:'hosting', linkedProjectIds:['billing'],
+    type:'domain', address:'domain.example.test', environment:'Staging', status:'registered', provider:'Fixture host',
+    expires:'2027-04-01', tags:[]};
+  const setup = await page.request.patch('/api/records', {headers:origin, data:{version:0, changes:[
+    create('projects', project('hosting')), create('projects', project('billing')),
+    create('resources', domain), create('resources', {...domain, id:'late', name:'Later renewal', linkedProjectIds:[], expires:'2027-05-01'}),
+  ]}});
+  expect(setup.status()).toBe(200);
+  expect((await page.request.get('/api/records/resources/domain')).status()).toBe(200);
+
+  await page.goto('/finance');
+  await page.getByRole('button', {name:'ثبت اشتراک دوره‌ای', exact:true}).click();
+  const form = page.getByRole('dialog', {name:'ثبت اشتراک دوره‌ای'});
+  await form.getByLabel('پروژه', {exact:true}).selectOption('billing');
+  await expect(form.getByLabel('منبع مرتبط').getByRole('option', {name:'Later renewal', exact:true})).toHaveCount(0);
+  await form.getByLabel('منبع مرتبط').selectOption('domain');
+  await form.getByLabel('عنوان', {exact:true}).fill('آزمون هزینه دامنه');
+  await form.getByLabel('ارائه‌دهنده').fill('Fixture host');
+  await form.getByLabel('واحد ارز').selectOption('USD');
+  const amount = form.getByLabel('مبلغ (دلار تا دو رقم اعشار)', {exact:true});
+  await amount.fill('12.50');
+  await form.getByLabel('موعد بعدی (میلادی)').fill('2027-04-01');
+  await page.route('**/api/records', route => route.fulfill({status:422, json:{error:'Synthetic validation rejection'}}), {times:1});
+  const submit = form.getByRole('button', {name:'ثبت اشتراک دوره‌ای', exact:true});
+  await submit.click();
+  await expect(form.getByRole('alert')).toContainText('ثبت اطلاعات مالی تأیید نشد');
+  await expect(amount).toHaveValue('12.50');
+  await submit.click();
+  await expect(form).toHaveCount(0);
+
+  const result = await page.request.get('/api/state');
+  expect(result.status()).toBe(200);
+  const snapshot = await result.json();
+  expect(snapshot.data.charges).toEqual([expect.objectContaining({
+    amount:1250, amountUnit:'minor', currency:'USD', projectId:'billing', linkedResourceId:'domain', nextDue:'2027-04-01',
+  })]);
+  const unrelated = await page.request.patch('/api/records', {headers:origin, data:{version:snapshot.version, changes:[
+    create('charges', {...snapshot.data.charges[0], id:'unrelated-resource', linkedResourceId:'late'}),
+  ]}});
+  expect(unrelated.status()).toBe(422);
+  const legacyPayload = {...snapshot.data, charges:[...snapshot.data.charges,
+    {...snapshot.data.charges[0], id:'unrelated-resource', linkedResourceId:'late'}]};
+  expect((await page.request.put('/api/state', {headers:origin, data:{version:snapshot.version, data:legacyPayload}})).status()).toBe(422);
+  expect((await page.request.get('/api/records/charges/unrelated-resource')).status()).toBe(404);
+  await page.goto('/infrastructure');
+  await page.getByLabel('مرتب‌سازی منابع').selectOption('renewal');
+  const first = page.getByRole('table', {name:'منابع زیرساخت'}).locator('tbody tr').first();
+  await expect(first.getByText('Domain renewal fixture', {exact:true})).toBeVisible();
+  await first.getByText('Domain renewal fixture', {exact:true}).click();
+  const metadata = page.getByRole('dialog', {name:'Domain renewal fixture'});
+  await expect(metadata.getByText(/آزمون هزینه دامنه.*۱۲٫۵۰ دلار/)).toBeVisible();
+});
+
+test('a viewer keeps access to the charge after resource sharing is revoked without seeing the resource reference', async ({request, origin, appURL}) => {
+  await bootstrap(request, origin);
+  const domain = {id:'domain', name:'Domain fixture', projectId:'hosting', linkedProjectIds:['billing'],
+    type:'domain', address:'domain.example.test', environment:'Staging', status:'registered', provider:'Fixture host', tags:[]};
+  const charge = {id:'charge', projectId:'billing', title:'Fixture charge', provider:'Fixture host',
+    amount:1250, amountUnit:'minor', currency:'USD', nextDue:'2027-04-01', period:'yearly', status:'active', linkedResourceId:'domain'};
+  const seed = await request.patch('/api/records', {headers:origin, data:{version:0, changes:[
+    create('projects', project('hosting')), create('projects', project('billing')),
+    create('resources', domain), create('charges', charge),
+  ]}});
+  expect(seed.status()).toBe(200);
+  const memberEmail = 'billing-viewer@example.test';
+  const invitation = await request.post('/api/team/invitations', {headers:origin,
+    data:{email:memberEmail, role:'viewer', projectIds:['billing']}});
+  expect(invitation.status()).toBe(200);
+  const viewer = await testRequest(appURL);
+  try {
+    const accepted = await viewer.post('/api/auth/accept-invite', {headers:origin,
+      data:{token:(await invitation.json()).token, email:memberEmail, password, displayName:'Billing viewer'}});
+    expect(accepted.status()).toBe(200);
+    const readCharge = () => viewer.get('/api/records/charges/charge');
+    const first = await readCharge();
+    expect(first.status()).toBe(200);
+    expect((await first.json()).record.linkedResourceId).toBe('domain');
+    const changed = await request.patch('/api/records', {headers:origin, data:{version:(await seed.json()).version,
+      changes:[{kind:'resources', id:'domain', action:'replace', record:{...domain, linkedProjectIds:[]}}]}});
+    expect(changed.status()).toBe(200);
+    const remaining = await readCharge();
+    expect(remaining.status()).toBe(200);
+    expect((await remaining.json()).record).toEqual(expect.objectContaining({amount:1250, currency:'USD'}));
+    expect((await remaining.json()).record).not.toHaveProperty('linkedResourceId');
+    expect((await viewer.get('/api/records/resources/domain')).status()).toBe(404);
+    const owner = await request.get('/api/records/charges/charge');
+    expect((await owner.json()).record.linkedResourceId).toBe('domain');
+  } finally { await viewer.dispose(); }
 });
