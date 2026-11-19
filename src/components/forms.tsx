@@ -32,10 +32,10 @@ export function ProjectField({ initial, all = false }: { initial?: string; all?:
 }
 
 export function ProjectForm({ onClose, project }: { onClose: () => void; project?: Project }) {
-  const { change } = useDemo();
+  const { change, saving } = useDemo();
   const router = useRouter();
   const [error, setError] = useState('');
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     const name = get('name');
     if (!name) { setError('نام پروژه را وارد کنید.'); return; }
@@ -47,8 +47,9 @@ export function ProjectForm({ onClose, project }: { onClose: () => void; project
       next:get('next') || 'تعریف گام بعدی', art:project?.art ?? 'navigation/projects',
     };
     const message = project ? 'پروژه به‌روزرسانی شد.' : 'پروژه ایجاد شد.';
-    change(data => ({ ...data, projects:project ? data.projects.map(p => p.id === project.id ? updated : p) : [...data.projects, updated] }),
+    const saved = await change(data => ({ ...data, projects:project ? data.projects.map(p => p.id === project.id ? updated : p) : [...data.projects, updated] }),
       message, { projectId:updated.id,title:message,source:'پروژه‌ها' });
+    if (!saved) { setError('ذخیرهٔ پروژه تأیید نشد.'); return; }
     onClose();
     if (!project) router.push(projectHref(updated.id));
   }
@@ -64,16 +65,16 @@ export function ProjectForm({ onClose, project }: { onClose: () => void; project
       <Field label="عنوان کوتاه"><input name="subtitle" maxLength={100} defaultValue={project?.subtitle} /></Field>
       <Field label="توضیحات"><textarea name="description" rows={3} maxLength={600} defaultValue={project?.description} /></Field>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <FormActions onClose={onClose} submit={project ? 'ذخیره تغییرات' : 'ایجاد پروژه'} />
+      <FormActions onClose={onClose} saving={saving} submit={project ? 'ذخیره تغییرات' : 'ایجاد پروژه'} />
     </form>
   </Modal>;
 }
 
 export function TaskForm({ onClose, task, projectId, status }: { onClose: () => void; task?: Task; projectId?: string; status?: TaskStatus }) {
-  const { data, change } = useDemo();
+  const { data, change, saving } = useDemo();
   const router = useRouter();
   const [error, setError] = useState('');
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('title')) { setError('عنوان وظیفه را وارد کنید.'); return; }
     const dependencyIds=new FormData(event.currentTarget).getAll('dependencies').map(String);
@@ -83,8 +84,9 @@ export function TaskForm({ onClose, task, projectId, status }: { onClose: () => 
       checklist:task?.checklist ?? [], comments:task?.comments ?? [], dependencies:dependencyIds,
     };
     const message = task ? 'تغییرات وظیفه ذخیره شد.' : 'وظیفه ایجاد شد.';
-    change(previous => ({ ...previous,tasks:task ? previous.tasks.map(t => t.id === item.id ? { ...item, checklist:t.checklist,comments:t.comments } : t) : [item, ...previous.tasks] }),
+    const saved = await change(previous => ({ ...previous,tasks:task ? previous.tasks.map(t => t.id === item.id ? { ...item, checklist:t.checklist,comments:t.comments } : t) : [item, ...previous.tasks] }),
       message, { projectId:item.projectId,title:message,detail:item.title,source:'وظایف' });
+    if (!saved) { setError('ذخیرهٔ وظیفه تأیید نشد.'); return; }
     onClose();
     if (!task) router.push(taskHref(item.id));
   }
@@ -103,7 +105,7 @@ export function TaskForm({ onClose, task, projectId, status }: { onClose: () => 
         {data.tasks.filter(t=>t.id!==task?.id).map(t=><option key={t.id} value={t.id}>{t.title} · {data.projects.find(p=>p.id===t.projectId)?.name}</option>)}
       </select></Field>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <FormActions onClose={onClose} submit={task ? 'ذخیره تغییرات' : 'ایجاد وظیفه'} />
+      <FormActions onClose={onClose} saving={saving} submit={task ? 'ذخیره تغییرات' : 'ایجاد وظیفه'} />
     </form>
   </Modal>;
 }
@@ -120,11 +122,11 @@ function validInventoryAddress(value: string) {
 }
 
 export function ResourceForm({ onClose, resource, projectId, initialType = 'server' }: { onClose: () => void; resource?: Resource; projectId?: string; initialType?: ResourceType }) {
-  const { change, data } = useDemo();
+  const { change, data, saving } = useDemo();
   const router = useRouter();
   const [type, setType] = useState<ResourceType>(resource?.type ?? initialType);
   const [error, setError] = useState('');
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('name') || !get('provider')) { setError('نام منبع و ارائه‌دهنده را وارد کنید.'); return; }
     if (!validInventoryAddress(get('address'))) { setError('یک IPv4، IPv6، دامنه یا URL معتبر بدون نام کاربری و رمز وارد کنید.'); return; }
@@ -135,8 +137,9 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
       expires:get('expires') || undefined, tags:get('tags').split(/[,،]/).map(tag => tag.trim()).filter(Boolean).slice(0,6),
     };
     const message = resource ? 'مشخصات منبع به‌روزرسانی شد.' : 'منبع ثبت شد.';
-    change(data => ({ ...data,resources:resource ? data.resources.map(r => r.id === item.id ? item : r) : [...data.resources,item] }),
+    const saved = await change(data => ({ ...data,resources:resource ? data.resources.map(r => r.id === item.id ? item : r) : [...data.resources,item] }),
       message,{ projectId:item.projectId,title:message,detail:item.name,source:'زیرساخت' });
+    if (!saved) { setError('ذخیرهٔ منبع تأیید نشد.'); return; }
     onClose();
     if (!resource && type === 'server') router.push(serverHref(item.id));
   }
@@ -163,20 +166,21 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
       </select><small className="muted">برای انتخاب چند پروژه Ctrl را نگه دارید. مالک اصلی از فیلد پروژه تعیین می‌شود.</small></div></Field>}
       <Field label="برچسب‌ها (جداشده با ویرگول)"><input dir="auto" name="tags" maxLength={100} key={type} defaultValue={resource?.tags.join('، ') ?? resourceTags[type]} /></Field>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <FormActions onClose={onClose} submit="ثبت مشخصات" />
+      <FormActions onClose={onClose} saving={saving} submit="ثبت مشخصات" />
     </form>
   </Modal>;
 }
 
 export function ReminderForm({ onClose, due, projectId }: { onClose: () => void; due?: string; projectId?: string }) {
-  const { change } = useDemo();
+  const { change, saving } = useDemo();
   const [error, setError] = useState('');
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('title')) { setError('عنوان رویداد را وارد کنید.'); return; }
     const item: Reminder = { id:newId('reminder'), title:get('title'), projectId:get('project'), due:get('due'),
       kind:get('kind') as Reminder['kind'], repeat:get('repeat') as Reminder['repeat'], zone:get('zone')||undefined };
-    change(data => ({ ...data, reminders:[...data.reminders,item] }), 'یادآوری ثبت شد.', { projectId:item.projectId, title:item.title, source:'تقویم' });
+    const saved = await change(data => ({ ...data, reminders:[...data.reminders,item] }), 'یادآوری ثبت شد.', { projectId:item.projectId, title:item.title, source:'تقویم' });
+    if (!saved) { setError('ذخیرهٔ یادآوری تأیید نشد.'); return; }
     onClose();
   }
   return <Modal title="رویداد جدید" onClose={onClose}><form className="form-stack" onSubmit={submit}>
@@ -193,7 +197,7 @@ export function ReminderForm({ onClose, due, projectId }: { onClose: () => void;
       <Field label="منطقهٔ زمانی"><select name="zone"><option value="">منطقهٔ زمانی فضای کاری</option>
         <option value="Asia/Tehran">تهران</option><option value="UTC">UTC</option><option value="Europe/Berlin">برلین</option></select></Field>
     </div>
-    <FormActions onClose={onClose} submit="ثبت رویداد" />
+    <FormActions onClose={onClose} saving={saving} submit="ثبت رویداد" />
   </form></Modal>;
 }
 

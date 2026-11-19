@@ -13,15 +13,16 @@ import { Art, Button, Callout, Empty, Field, FormActions, Heading, IconButton, M
 const docTypes: DocType[] = ['Runbook','Technical Design','Decision Record','Checklist','Release Notes'];
 
 function DocForm({ onClose, doc, projectId, onSaved }: { onClose: () => void; doc?: Doc; projectId: string; onSaved: (id: string) => void }) {
-  const { change } = useDemo();
+  const { change, saving } = useDemo();
   const [error,setError] = useState('');
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('title') || !get('body')) { setError('عنوان و متن سند را وارد کنید.'); return; }
     const item: Doc = { id:doc?.id ?? newId('doc'), title:get('title'), projectId:get('project'), type:get('type') as DocType,
       body:get('body'), revision:(doc?.revision ?? 0) + 1, updated:now() };
-    change(data => ({...data,docs:doc ? data.docs.map(d => d.id === item.id ? item : d) : [item,...data.docs]}),
+    const saved = await change(data => ({...data,docs:doc ? data.docs.map(d => d.id === item.id ? item : d) : [item,...data.docs]}),
       'مستند ذخیره شد.',{ projectId:item.projectId,title:doc ? 'سند به‌روزرسانی شد' : 'سند جدید ثبت شد',detail:item.title,source:'مستندات' });
+    if (!saved) { setError('ذخیرهٔ سند تأیید نشد.'); return; }
     onSaved(item.id);
     onClose();
   }
@@ -31,7 +32,7 @@ function DocForm({ onClose, doc, projectId, onSaved }: { onClose: () => void; do
       <div className="form-grid"><ProjectField initial={doc?.projectId ?? projectId} /><Field label="نوع سند"><select name="type" defaultValue={doc?.type}><SelectOptions options={docTypes} /></select></Field></div>
       <Field label="متن سند (بدون رمز و توکن)"><textarea required name="body" rows={8} maxLength={6000} defaultValue={doc?.body} /></Field>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <FormActions onClose={onClose} submit="ذخیره سند" />
+      <FormActions onClose={onClose} saving={saving} submit="ذخیره سند" />
     </form>
   </Modal>;
 }

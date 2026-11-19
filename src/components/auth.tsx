@@ -48,7 +48,7 @@ export function Login() {
 const steps = ['فضای کاری','پروژه اول','بازبینی'];
 export function Onboarding() {
   const router = useRouter();
-  const { data,change } = useDemo();
+  const { data,change,saving } = useDemo();
   const [step,setStep] = useState(0);
   const [workspace,setWorkspace] = useState(data.preferences.workspace);
   const [role,setRole] = useState('توسعه‌دهنده مستقل');
@@ -58,7 +58,7 @@ export function Onboarding() {
   const [sampleTask,setSampleTask] = useState(true);
   const [error,setError] = useState('');
 
-  function advance(event: FormEvent<HTMLFormElement>) {
+  async function advance(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (step === 0 && !get('workspace')) {setError('نام فضای کاری را وارد کنید.');return;}
     if (step === 1 && !get('name')) {setError('نام پروژه را وارد کنید.');return;}
@@ -71,9 +71,10 @@ export function Onboarding() {
       status:'todo',priority:'medium',description:'موارد آغاز پروژه را با تیم مرور کنید.',checklist:[],comments:[],dependencies:[]}] : [];
     const preferences = {...data.preferences,workspace:workspace.trim()};
     savePreferences(preferences);
-    change(previous => ({...previous,preferences,projects:[...previous.projects,project],tasks:[...previous.tasks,...tasks]}),
+    const saved = await change(previous => ({...previous,preferences,projects:[...previous.projects,project],tasks:[...previous.tasks,...tasks]}),
       'فضای کاری و پروژه ثبت شدند.',
       {projectId:id,title:'راه‌اندازی پروژه',source:'پروژه‌ها'});
+    if (!saved) { setError('ذخیرهٔ فضای کاری تأیید نشد.'); return; }
     router.push(projectHref(id));
   }
 
@@ -99,7 +100,7 @@ export function Onboarding() {
             <Row icon={FolderKanban} title={name.trim()} meta={<>{type} · {sampleTask ? 'با یک وظیفهٔ نمونه' : 'بدون وظیفهٔ اولیه'}</>} />
           </div>}
           {error && <p className="form-error" role="alert">{error}</p>}
-          <div className="form-actions"><Button type="submit" variant="primary" icon={ArrowLeft}>{['ادامه و افزودن پروژه','مرور اطلاعات','ایجاد پروژه'][step]}</Button>
+          <div className="form-actions"><Button type="submit" variant="primary" icon={ArrowLeft} disabled={saving}>{['ادامه و افزودن پروژه','مرور اطلاعات','ایجاد پروژه'][step]}</Button>
             {step > 0 && <Button onClick={() => {setStep(step - 1);setError('');}}>بازگشت</Button>}</div>
         </form>
       </Panel>

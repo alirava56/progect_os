@@ -122,8 +122,8 @@ export function Modal({ title, onClose, children, align = 'center' }: { title: s
     </div>
   </dialog>;
 }
-export function FormActions({ onClose, submit = 'ذخیره' }: { onClose: () => void; submit?: string }) {
-  return <div className="form-actions"><Button type="submit" variant="primary">{submit}</Button><Button onClick={onClose}>انصراف</Button></div>;
+export function FormActions({ onClose, submit = 'ذخیره', saving = false }: { onClose: () => void; submit?: string; saving?: boolean }) {
+  return <div className="form-actions"><Button type="submit" variant="primary" disabled={saving}>{submit}</Button><Button onClick={onClose}>انصراف</Button></div>;
 }
 export const formValues = (event: FormEvent<HTMLFormElement>) => {
   event.preventDefault();

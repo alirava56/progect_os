@@ -122,7 +122,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </nav>
         </div>
         <div className="top-tools">
-          <button className="top-search" type="button" onClick={() => setOverlay('search')} aria-label="جست‌وجوی فضای کاری">
+          <button className="top-search" type="button" onClick={() => setOverlay('search')} title="جست‌وجوی فضای کاری">
             <Search size={16} aria-hidden="true" /><span>جست‌وجوی فضای کاری</span><kbd dir="ltr" aria-hidden="true">Ctrl K</kbd>
           </button>
           <IconButton icon={Plus} label="افزودن سریع" onClick={() => setOverlay('quick')} />

@@ -7,7 +7,7 @@ import type { ActivityEvent, DemoData, Preferences } from './types';
 
 interface Store {
   data: DemoData;
-  change: (mutator: (data: DemoData) => DemoData, message: string, event?: Pick<ActivityEvent, 'projectId' | 'title' | 'source'> & { detail?: string }) => void;
+  change: (mutator: (data: DemoData) => DemoData, message: string, event?: Pick<ActivityEvent, 'projectId' | 'title' | 'source'> & { detail?: string }) => Promise<boolean>;
   notice: (message: string) => void;
   projectScope: string;
   setProjectScope: (id: string) => void;
@@ -66,22 +66,22 @@ export function DemoProvider({ children, initialData, initialVersion = 0, authen
     setData(snapshot.data);
   }
 
-  const change: Store['change'] = (mutator, text) => {
-    if (!authenticated) { notice('برای ذخیره اطلاعات، ابتدا وارد حساب خود شوید.'); return; }
-    if (dataRef.current.users[0]?.role === 'Viewer') { notice('حساب شما فقط مجوز مشاهده دارد.'); return; }
+  const change: Store['change'] = async (mutator, text) => {
+    if (!authenticated) { notice('برای ذخیره اطلاعات، ابتدا وارد حساب خود شوید.'); return false; }
+    if (dataRef.current.users[0]?.role === 'Viewer') { notice('حساب شما فقط مجوز مشاهده دارد.'); return false; }
     const previous = dataRef.current;
     const version = revision.current;
     let next: DemoData;
     try { next = mutator(structuredClone(previous)); }
-    catch { notice('انجام تغییر امکان‌پذیر نبود.'); return; }
+    catch { notice('انجام تغییر امکان‌پذیر نبود.'); return false; }
 
     const changes = changesBetween(previous, next);
     const preferences = JSON.stringify(previous.preferences) === JSON.stringify(next.preferences) ? undefined : next.preferences;
-    if (!changes.length && !preferences) return;
+    if (!changes.length && !preferences) return true;
     const body = JSON.stringify({ version, changes, preferences });
     setSaving(true);
     pending.current++;
-    queue.current = queue.current.then(async () => {
+    const operation = queue.current.then(async () => {
       let confirmed = false;
       try {
         const response = await fetch('/api/records', {
@@ -91,27 +91,31 @@ export function DemoProvider({ children, initialData, initialVersion = 0, authen
         if (response.status === 409) {
           await refreshState();
           setSyncError('رکورد تغییر کرده است. آخرین نسخه دریافت شد. تغییر را دوباره بررسی و ثبت کنید.');
-          return;
+          return false;
         }
         if (!response.ok) {
           setSyncError(response.status === 403
             ? 'حساب شما اجازهٔ انجام این تغییر را ندارد.'
             : 'سرور تغییر را نپذیرفت. ورودی‌ها را بررسی کنید و دوباره تلاش کنید.');
-          return;
+          return false;
         }
         confirmed = true;
         await refreshState();
         setSyncError(null);
         notice(text);
+        return true;
       } catch {
         setSyncError(confirmed
           ? 'تغییر ذخیره شد. برای دریافت آخرین داده‌ها، صفحه را تازه کنید.'
           : 'نتیجهٔ ذخیره تأیید نشد. پیش از تلاش مجدد، صفحه را تازه کنید.');
+        return confirmed;
       }
     }).finally(() => {
       pending.current--;
       if (!pending.current) setSaving(false);
     });
+    queue.current = operation.then(() => undefined);
+    return operation;
   };
 
   return <DemoContext.Provider value={{ data, change, notice, projectScope, setProjectScope, saving, syncError }}>

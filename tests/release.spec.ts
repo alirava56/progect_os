@@ -151,3 +151,25 @@ test('authenticated read performance on a controlled synthetic workspace',async(
   console.log(JSON.stringify({requests:50,concurrency:5,records:61,p95Ms:Math.round(p95)}));
   expect(p95).toBeLessThan(2000);
 });
+
+test('project form waits for the server commit before navigation and persists after reload',async({page,origin})=>{
+  await bootstrap(page.request,origin);
+  await page.goto('/projects');
+  await page.getByRole('button',{name:'پروژه جدید',exact:true}).click();
+  const name='پروژهٔ آزمایشی از فرم';
+  await page.getByLabel('نام پروژه').fill(name);
+  let release!:()=>void;
+  const pending=new Promise<void>(resolve=>{release=resolve;});
+  await page.route('**/api/records',async route=>{await pending;await route.continue();});
+  const submit=page.getByRole('button',{name:'ایجاد پروژه',exact:true});
+  try {
+    await submit.click();
+    await expect(submit).toBeDisabled();
+    await expect(page).toHaveURL(/\/projects$/);
+    await expect(page.getByText('پروژه ایجاد شد.',{exact:true})).toHaveCount(0);
+  } finally { release(); }
+  await expect(page).toHaveURL(/\/projects\/project-/);
+  await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
+});
