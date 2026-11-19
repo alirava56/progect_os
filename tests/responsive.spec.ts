@@ -1,13 +1,35 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { test, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { setupToken, test } from './isolated-app';
 import { routes } from './routes';
 
 const widths = [360, 390, 768, 1024, 1440, 1920];
 const mobileReferences = ['dashboard', 'projects', 'project', 'tasks', 'infrastructure'];
 
+test.beforeEach(async ({page, origin}) => {
+  const result = await page.request.post('/api/auth/setup', {headers:origin, data:{
+    setupToken, email:'responsive-owner@example.test', password:'synthetic-responsive-regression-password',
+    displayName:'آزمون رابط',workspace:'فضای آزمایشی رابط',
+  }});
+  expect(result.status()).toBe(200);
+  const project = {id:'gym', name:'باشگاه شب قهرمانان', coverTitle:'باشگاه شب قهرمانان', subtitle:'آزمایشی',
+    description:'', status:'building', type:'وب‌سایت', progress:0, next:'', art:'navigation/projects'};
+  const server = {id:'nova-vps', name:'NovaGuard Main VPS', projectId:'gym', type:'server', address:'203.0.113.24',
+    environment:'Staging', status:'registered', provider:'Synthetic provider', tags:[], linkedProjectIds:[]};
+  const task = {id:'TASK-024', title:'رفع ناسازگاری رابط رزرو', projectId:'gym', status:'todo', priority:'medium',
+    owner:'آزمایشی', due:'2027-03-01', description:'', checklist:[], comments:[], dependencies:[]};
+  const seeded = await page.request.patch('/api/records', {headers:origin, data:{version:0, changes:[
+    {action:'create', kind:'projects', id:project.id, record:project},
+    {action:'create', kind:'resources', id:server.id, record:server},
+    {action:'create', kind:'tasks', id:task.id, record:task},
+  ]}});
+  expect(seeded.status(), await seeded.text()).toBe(200);
+});
+
 for (const width of widths) {
   test(`21 RTL routes at ${width}px`, async ({ page }) => {
+    test.setTimeout(120_000);
     await page.setViewportSize({ width, height: width <= 390 ? 880 : 1000 });
     const errors: string[] = [];
     const external = new Set<string>();
@@ -22,8 +44,10 @@ for (const width of widths) {
 
     for (const [route, key, title] of routes) {
       await test.step(route, async () => {
+        if (key === 'login') await page.context().clearCookies();
         const response = await page.goto(route);
         expect(response?.ok()).toBe(true);
+        expect(new URL(page.url()).pathname).toBe(route);
         await expect(page.getByRole('heading', { name: title, level: 1, exact: true })).toBeVisible();
         await expect(page.locator('html')).toHaveAttribute('dir','rtl');
         await expect(page.locator('html')).toHaveAttribute('lang','fa');

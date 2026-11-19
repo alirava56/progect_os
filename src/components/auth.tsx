@@ -55,7 +55,7 @@ export function Onboarding() {
   const [name,setName] = useState('');
   const [type,setType] = useState('وب‌سایت');
   const [description,setDescription] = useState('');
-  const [sampleTask,setSampleTask] = useState(true);
+  const [sampleTask,setSampleTask] = useState(false);
   const [error,setError] = useState('');
 
   async function advance(event: FormEvent<HTMLFormElement>) {
@@ -67,7 +67,7 @@ export function Onboarding() {
     const id = newId('project');
     const project: Project = {id,name:name.trim(),coverTitle:name.trim(),subtitle:type,description:description.trim(),type,
       status:'building',progress:0,next:'مرور برنامه تحویل',art:'navigation/projects'};
-    const tasks: Task[] = sampleTask ? [{id:newId('task'),title:'مرور برنامه تحویل',projectId:id,due:today(),owner:'dev',
+    const tasks: Task[] = sampleTask ? [{id:newId('task'),title:'مرور برنامه تحویل',projectId:id,due:today(),owner:data.users[0]?.id ?? '',
       status:'todo',priority:'medium',description:'موارد آغاز پروژه را با تیم مرور کنید.',checklist:[],comments:[],dependencies:[]}] : [];
     const preferences = {...data.preferences,workspace:workspace.trim()};
     savePreferences(preferences);

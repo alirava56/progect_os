@@ -297,3 +297,41 @@ test('a viewer keeps access to the charge after resource sharing is revoked with
     expect((await owner.json()).record.linkedResourceId).toBe('domain');
   } finally { await viewer.dispose(); }
 });
+
+test('secure login and the three-step onboarding save a real workspace and its optional starter task', async ({page, origin, appURL}) => {
+  const setup = await testRequest(appURL);
+  try { await bootstrap(setup, origin); }
+  finally { await setup.dispose(); }
+  await page.goto('/login');
+  await page.getByLabel('ایمیل', {exact:true}).fill(email);
+  const passwordField = page.getByLabel('رمز عبور', {exact:true});
+  await passwordField.fill('synthetic-invalid-onboarding-credential');
+  const login = page.getByRole('button', {name:'ورود امن', exact:true});
+  await login.click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('ایمیل یا رمز معتبر نیست');
+  await expect(page).toHaveURL('/login');
+  await passwordField.fill(password);
+  await login.click();
+  await expect(page).toHaveURL('/dashboard');
+  expect(await page.evaluate(() => JSON.stringify({...localStorage,...sessionStorage}))).not.toContain(password);
+  await page.getByRole('button', {name:'حساب کاربری'}).click();
+  await page.getByRole('link', {name:'راه‌اندازی فضای کاری'}).click();
+  const workspace = 'فضای شروع آزمایشی';
+  const firstProject = 'پروژهٔ آغاز آزمایشی';
+  await page.getByLabel('نام فضای کاری').fill(workspace);
+  await page.getByRole('button', {name:'ادامه و افزودن پروژه'}).click();
+  await page.getByLabel('نام پروژه').fill(firstProject);
+  const starter = page.getByRole('checkbox', {name:'افزودن یک وظیفهٔ نمونه'});
+  await expect(starter).not.toBeChecked();
+  await starter.check();
+  await page.getByRole('button', {name:'مرور اطلاعات'}).click();
+  await expect(page.getByRole('heading', {name:'بازبینی و ساخت فضای کاری'})).toBeVisible();
+  await page.getByRole('button', {name:'ایجاد پروژه', exact:true}).click();
+  await expect(page.getByRole('heading', {level:1, name:firstProject})).toBeVisible();
+  await expect(page.getByRole('link', {name:/مرور برنامه تحویل/})).toBeVisible();
+  const snapshot = await page.request.get('/api/state');
+  expect(snapshot.status()).toBe(200);
+  const {data} = await snapshot.json();
+  expect(data.preferences.workspace).toBe(workspace);
+  expect(data.tasks).toEqual([expect.objectContaining({title:'مرور برنامه تحویل', owner:data.users[0].id})]);
+});

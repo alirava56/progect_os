@@ -262,24 +262,3 @@ test('team invite, integration disclosure and persisted UI preferences', async (
   await nav.getByRole('link',{name:'کاربران و دسترسی‌ها'}).click();
   await expect(page.getByText('teammate@example.com')).toHaveCount(0);
 });
-
-test('demo login and the three-step onboarding', async ({ page }) => {
-  await page.goto('/login');
-  await page.getByRole('button',{name:'ورود به حساب نمایشی'}).click();
-  await expect(page).toHaveURL('/login');
-  await page.getByLabel('ایمیل نمونه').fill('review@example.com');
-  await page.getByLabel('رمز عبور نمایشی').fill('demo-test');
-  await page.getByRole('button',{name:'ورود به حساب نمایشی'}).click();
-  await expect(page).toHaveURL('/dashboard');
-  expect(await page.evaluate(() => JSON.stringify({...localStorage,...sessionStorage}))).not.toContain('demo-test');
-  await page.getByRole('button',{name:'حساب کاربری'}).click();
-  await page.getByRole('link',{name:'راه‌اندازی فضای کاری'}).click();
-  await page.getByLabel('نام فضای کاری').fill('آغاز پروژه');
-  await page.getByRole('button',{name:'ادامه و افزودن پروژه'}).click();
-  await page.getByLabel('نام پروژه').fill('پروژه آغاز نمونه');
-  await page.getByRole('button',{name:'مرور اطلاعات'}).click();
-  await expect(page.getByRole('heading',{name:'بازبینی و ساخت فضای کاری'})).toBeVisible();
-  await page.getByRole('button',{name:'ایجاد فضای کاری نمونه'}).click();
-  await expect(page.getByRole('heading',{level:1,name:'پروژه آغاز نمونه'})).toBeVisible();
-  await expect(page.getByRole('link',{name:/مرور برنامه تحویل/})).toBeVisible();
-});

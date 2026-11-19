@@ -7,9 +7,12 @@
 | ساخت و ویرایش پروژه، ثبت VPS، دو دامنه، دیتابیس، دو وظیفه و Runbook از رابط فارسی | `IMPLEMENTED_AND_VERIFIED` | `npm run test:project-lifecycle`، هر سه پروژهٔ آزمایشی NovaGuard، باشگاه و MOKMOK موفق در Chrome و PostgreSQL 17.12 محلی. مرورگر تازه پس از Restart و ورود مجدد، داده‌ها و ارتباط والد دیتابیس را نشان داد. |
 | بایگانی با تأیید سرور و حذف از صفحهٔ پروژه | `IMPLEMENTED_AND_VERIFIED` | `npm run test:smoke`، Chrome با ۱۶ نتیجهٔ موفق. حذف پروژهٔ خالی بایگانی‌شده موفق بود. درخواست حذف پروژهٔ دارای منبع مشترک رد شد و هر دو رکورد باقی ماندند. |
 | هزینهٔ تمدید منبع مشترک و مرتب‌سازی منابع بر اساس نام یا موعد تمدید | `IMPLEMENTED_AND_VERIFIED` | ثبت ۱۲٫۵۰ دلار با مقدار دقیق ۱۲۵۰ سنت، بازیابی خطای فرم و رد ارجاع نامعتبر در هر دو API نوشتن. بعد از لغو اشتراک‌گذاری، عضو محدود هزینه را می‌بیند و شناسهٔ منبع در پاسخ حذف می‌شود. |
+| ورود واقعی و راه‌اندازی سه‌مرحله‌ای، RTL و Responsive | `IMPLEMENTED_AND_VERIFIED` | آزمون ورود دموی تاریخی با بررسی ورود ناموفق و موفق، عدم ماندگاری رمز در Browser Storage، و ذخیرهٔ فضای کاری و وظیفهٔ اختیاری جایگزین شد. هر ۶ آزمون تاریخی RTL، ۲۱ صفحه را در عرض ۳۶۰، ۳۹۰، ۷۶۸، ۱۰۲۴، ۱۴۴۰ و ۱۹۲۰ بررسی می‌کنند. |
 | پذیرش کل فاز ۱ | `PARTIAL` | سناریوهای اصلی ماندگاری و روال‌های جدید سبز هستند. تکمیل پوشش مجموعه‌های تاریخی و یکپارچگی همهٔ فرم‌ها باز است. |
 
-`npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ Smoke گسترش‌یافته در Chrome و Firefox هرکدام ۱۸ نتیجهٔ موفق داشت. اجرای [CI نسخهٔ مبنا](https://github.com/alirava56/progect_os/actions/runs/44632719901) در بازیابی PostgreSQL 16 خطا داد. [اجرای بعدی فاز ۱](https://github.com/alirava56/progect_os/actions/runs/44634151927) در Windows، Ubuntu، CodeQL و آزمایش‌های PostgreSQL موفق بود. وضعیت انتشار همچنان **NO-GO** است. جدول زیر سند اجرای ۱۹ نوامبر است.
+`npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ ۱۸‌تایی Chrome، Firefox و WebKit سبز شد. پس از افزودن ۷ آزمون سازگارشدهٔ تاریخی، Chromium هر ۲۵ سناریو را پاس کرد. ۱۳ آزمون تاریخی Workflow همچنان از الگوی دمو استفاده می‌کنند و برای این نسخه تأیید نشده‌اند.
+
+اجرای [CI نسخهٔ مبنا](https://github.com/alirava56/progect_os/actions/runs/44632719901) در بازیابی PostgreSQL 16 خطا داد. [اجرای فاز ۱](https://github.com/alirava56/progect_os/actions/runs/44634151927) و [اجرای هزینه و دسترسی صرفاً با تنظیم معمول](https://github.com/alirava56/progect_os/actions/runs/44635325658) در Windows، Ubuntu، CodeQL و آزمایش‌های PostgreSQL موفق بودند. علت خطای اجرای اولیه قطعی نیست. وضعیت انتشار همچنان **NO-GO** است. جدول زیر سند اجرای ۱۹ نوامبر است.
 
 **حکم انتشار Production: NO-GO**
 
