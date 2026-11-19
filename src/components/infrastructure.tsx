@@ -21,6 +21,7 @@ const resourceLink = (r: Resource) => r.type === 'server' ? serverHref(r.id) : `
 
 function ResourceMeta({ resource }: { resource: Resource }) {
   const { data } = useDemo();
+  const parent = data.resources.find(item => item.id === resource.parentId);
   const items = [
     {label:'نام منبع',value:<bdi>{resource.name}</bdi>},
     {label:'آدرس ثبت‌شده',value:<bdi dir="ltr" className="mono">{resource.address}</bdi>},
@@ -31,6 +32,9 @@ function ResourceMeta({ resource }: { resource: Resource }) {
       {label:'پورت SSH',value:<bdi dir="ltr" className="mono">{resource.port ?? '—'}</bdi>},
       {label:'موقعیت دیتاسنتر',value:resource.region ?? 'ثبت نشده'},
     ] : []),
+    ...(resource.type !== 'server' && resource.port !== undefined
+      ? [{label:'پورت سرویس',value:<bdi dir="ltr" className="mono">{resource.port}</bdi>}] : []),
+    ...(parent ? [{label:'منبع والد',value:<Link className="cell-link" href={resourceLink(parent)}><bdi>{parent.name}</bdi></Link>}] : []),
     {label:'پروژه مرتبط',value:<Link className="cell-link" href={projectHref(resource.projectId)}><bdi>{projectName(data,resource.projectId)}</bdi></Link>},
     {label:'تاریخ تمدید',value:resource.expires ? dateLabel(resource.expires,{day:'numeric',month:'long',year:'numeric'}) : <span className="ink-warn">ثبت نشده</span>},
     {label:'برچسب‌ها',value:resource.tags.length ? resource.tags.map(tag => <Pill key={tag}><bdi>{tag}</bdi></Pill>) : '—'},

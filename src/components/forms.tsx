@@ -3,14 +3,15 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDemo } from '@/lib/store';
-import type { DemoData, Environment, Project, ProjectStatus, Resource, ResourceType, ResourceStatus, Task, TaskStatus, Priority, Reminder } from '@/lib/types';
+import type { DemoData, Doc, DocType, Environment, Project, ProjectStatus, Resource, ResourceType, ResourceStatus, Task, TaskStatus, Priority, Reminder } from '@/lib/types';
 import { choices, priorities, projectStatuses, resourceStatuses, resourceTypes, taskStatuses } from '@/lib/labels';
-import { newId, projectHref, serverHref, taskHref, today } from '@/lib/format';
+import { newId, now, projectHref, serverHref, taskHref, today } from '@/lib/format';
 import { Callout, Field, Filter, FormActions, Modal, formValues, type Choice } from './ui';
 
-const environments = ['Production', 'Staging', 'Development'];
+const environments = ['Development', 'Staging', 'Production'];
 const projectTypes = ['وب‌سایت', 'محصول نرم‌افزاری', 'زیرساخت', 'سایر'];
 const resourceTags: Record<ResourceType, string> = { server:'VPS',domain:'DNS',database:'SQL',service:'HTTPS' };
+const docTypes: DocType[] = ['Runbook', 'Technical Design', 'Decision Record', 'Checklist', 'Release Notes'];
 
 export function ProjectFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const { data } = useDemo();
@@ -121,11 +122,14 @@ function validInventoryAddress(value: string) {
   return /^[a-z0-9][a-z0-9.:[\]-]{0,349}$/i.test(address);
 }
 
-export function ResourceForm({ onClose, resource, projectId, initialType = 'server' }: { onClose: () => void; resource?: Resource; projectId?: string; initialType?: ResourceType }) {
+export function ResourceForm({ onClose, resource, projectId, initialType = 'server', openServer = true }: {
+  onClose: () => void; resource?: Resource; projectId?: string; initialType?: ResourceType; openServer?: boolean;
+}) {
   const { change, data, saving } = useDemo();
   const router = useRouter();
   const [type, setType] = useState<ResourceType>(resource?.type ?? initialType);
   const [error, setError] = useState('');
+  const canSetPort = type !== 'domain';
   async function submit(event: FormEvent<HTMLFormElement>) {
     const get = formValues(event);
     if (!get('name') || !get('provider')) { setError('نام منبع و ارائه‌دهنده را وارد کنید.'); return; }
@@ -133,7 +137,8 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
     const sharedProjects = [...new FormData(event.currentTarget).getAll('sharedProjects')].map(String).filter(id=>id!==get('project'));
     const item: Resource = { ...resource, id:resource?.id ?? newId('resource'), name:get('name'), projectId:get('project'), linkedProjectIds:sharedProjects, type,
       address:get('address'), environment:get('environment') as Environment,status:get('status') as ResourceStatus,
-      provider:get('provider'), region:get('region') || undefined, os:get('os') || undefined, port:type === 'server' ? Number(get('port')) : undefined,
+      provider:get('provider'), region:get('region') || undefined, os:get('os') || undefined,
+      port:canSetPort ? get('port') ? Number(get('port')) : undefined : resource?.port, parentId:get('parent') || undefined,
       expires:get('expires') || undefined, tags:get('tags').split(/[,،]/).map(tag => tag.trim()).filter(Boolean).slice(0,6),
     };
     const message = resource ? 'مشخصات منبع به‌روزرسانی شد.' : 'منبع ثبت شد.';
@@ -141,7 +146,7 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
       message,{ projectId:item.projectId,title:message,detail:item.name,source:'زیرساخت' });
     if (!saved) { setError('ذخیرهٔ منبع تأیید نشد.'); return; }
     onClose();
-    if (!resource && type === 'server') router.push(serverHref(item.id));
+    if (!resource && type === 'server' && openServer) router.push(serverHref(item.id));
   }
   return <Modal title={resource ? 'ویرایش منبع' : 'افزودن منبع'} onClose={onClose}>
     <form className="form-stack" onSubmit={submit}>
@@ -152,21 +157,53 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
         <Field label="نوع منبع"><select value={type} disabled={!!resource} onChange={e => setType(e.target.value as ResourceType)}><SelectOptions options={choices(resourceTypes)} /></select></Field>
         <Field label="آدرس"><input dir="ltr" name="address" required placeholder="203.0.113.24" defaultValue={resource?.address} maxLength={350} /></Field>
         <Field label="محیط"><select name="environment" defaultValue={resource?.environment}><SelectOptions options={environments} /></select></Field>
-        <Field label="ارائه‌دهنده"><input name="provider" required maxLength={70} defaultValue={resource?.provider ?? 'Example Cloud'} dir="auto" /></Field>
+        <Field label="ارائه‌دهنده"><input name="provider" required maxLength={70} defaultValue={resource?.provider} dir="auto" /></Field>
         <Field label="وضعیت"><select name="status" defaultValue={resource?.status}><SelectOptions options={choices(resourceStatuses)} /></select></Field>
+        {canSetPort && <Field label={type === 'server' ? 'پورت SSH' : 'پورت سرویس'}><input dir="ltr" name="port" type="number" min="1" max="65535" defaultValue={resource?.port} /></Field>}
         {type === 'server' && <>
-          <Field label="پورت SSH"><input dir="ltr" name="port" type="number" min="1" max="65535" defaultValue={resource?.port ?? 22} required /></Field>
           <Field label="سیستم‌عامل"><input dir="auto" name="os" maxLength={60} defaultValue={resource?.os} /></Field>
           <Field label="موقعیت"><input dir="auto" name="region" maxLength={60} defaultValue={resource?.region} /></Field>
         </>}
         <Field label="سررسید (میلادی)"><input dir="ltr" name="expires" type="date" defaultValue={resource?.expires} /></Field>
+        <Field label="منبع والد"><select name="parent" defaultValue={resource?.parentId ?? ''}>
+          <option value="">بدون منبع والد</option>
+          {data.resources.filter(item => item.id !== resource?.id).map(item =>
+            <option key={item.id} value={item.id}>{item.name} · {projectName(data, item.projectId)}</option>)}
+        </select></Field>
       </div>
-      {data.projects.length>1 && <Field label="پروژه‌های مرتبط دیگر (برای منابع مشترک)"><div><select name="sharedProjects" multiple size={Math.min(4,data.projects.length)} defaultValue={resource?.linkedProjectIds??[]}>
+      {data.projects.length>1 && <Field label="پروژه‌های مرتبط دیگر (برای منابع مشترک)"><select name="sharedProjects" multiple size={Math.min(4,data.projects.length)} defaultValue={resource?.linkedProjectIds??[]}>
         {data.projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}
-      </select><small className="muted">برای انتخاب چند پروژه Ctrl را نگه دارید. مالک اصلی از فیلد پروژه تعیین می‌شود.</small></div></Field>}
+      </select></Field>}
       <Field label="برچسب‌ها (جداشده با ویرگول)"><input dir="auto" name="tags" maxLength={100} key={type} defaultValue={resource?.tags.join('، ') ?? resourceTags[type]} /></Field>
       {error && <p className="form-error" role="alert">{error}</p>}
       <FormActions onClose={onClose} saving={saving} submit="ثبت مشخصات" />
+    </form>
+  </Modal>;
+}
+
+export function DocForm({ onClose, doc, projectId, onSaved }: {
+  onClose: () => void; doc?: Doc; projectId: string; onSaved?: (id: string) => void;
+}) {
+  const { change, saving } = useDemo();
+  const [error, setError] = useState('');
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    const get = formValues(event);
+    if (!get('title') || !get('body')) { setError('عنوان و متن سند را وارد کنید.'); return; }
+    const item: Doc = { id:doc?.id ?? newId('doc'), title:get('title'), projectId:get('project'), type:get('type') as DocType,
+      body:get('body'), revision:(doc?.revision ?? 0) + 1, updated:now() };
+    const saved = await change(data => ({...data,docs:doc ? data.docs.map(d => d.id === item.id ? item : d) : [item,...data.docs]}),
+      'مستند ذخیره شد.',{ projectId:item.projectId,title:doc ? 'سند به‌روزرسانی شد' : 'سند جدید ثبت شد',detail:item.title,source:'مستندات' });
+    if (!saved) { setError('ذخیرهٔ سند تأیید نشد.'); return; }
+    onSaved?.(item.id);
+    onClose();
+  }
+  return <Modal title={doc ? 'ویرایش سند' : 'سند جدید'} onClose={onClose}>
+    <form className="form-stack" onSubmit={submit}>
+      <Field label="عنوان سند"><input autoFocus required name="title" maxLength={90} defaultValue={doc?.title} /></Field>
+      <div className="form-grid"><ProjectField initial={doc?.projectId ?? projectId} /><Field label="نوع سند"><select name="type" defaultValue={doc?.type}><SelectOptions options={docTypes} /></select></Field></div>
+      <Field label="متن سند (بدون رمز و توکن)"><textarea required name="body" rows={8} maxLength={6000} defaultValue={doc?.body} /></Field>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <FormActions onClose={onClose} saving={saving} submit="ذخیره سند" />
     </form>
   </Modal>;
 }

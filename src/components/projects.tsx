@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Activity, Archive, ArrowUpLeft, Bell, Check, CircleAlert, Clock3, FolderKanban, FolderOpen, Grid2X2, List, ListTodo, Pencil, Plus, Server, ShieldCheck } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Activity, Archive, ArrowUpLeft, Bell, Check, CircleAlert, Clock3, FolderKanban, FolderOpen, Grid2X2, List, ListTodo, Pencil, Plus, Server, ShieldCheck, Trash2 } from 'lucide-react';
 import { dateLabel, docHref, matches, number, percent, projectHref, serverHref, taskHref, money } from '@/lib/format';
 import { choices, priorities, priorityTones, projectStatuses, projectTones, resourceStatuses, resourceTones, taskStatuses, taskTones } from '@/lib/labels';
 import { useDemo } from '@/lib/store';
 import type { Project, Resource, Task } from '@/lib/types';
 import { projectCompleteness } from '@/lib/completeness';
 import { Art, Button, Empty, Filter, Glyph, Heading, LinkButton, Metrics, Modal, Panel, Pill, Progress, Row, SearchField, SectionBar, Segments, Table, TextLink, visibleLink } from './ui';
-import { ProjectForm, TaskForm, projectName } from './forms';
+import { DocForm, ProjectForm, ResourceForm, TaskForm, projectName } from './forms';
 
 export function ProjectTable({ projects }: { projects: Project[] }) {
   return <Table compact label="فهرست پروژه‌ها" rows={projects} columns={[
@@ -126,9 +127,11 @@ function ProjectResourceRows({ resources }: { resources: Resource[] }) {
     href={r.type === 'server' ? serverHref(r.id) : `/infrastructure?resource=${r.id}`} end={<Pill tone={resourceTones[r.status]}>{resourceStatuses[r.status]}</Pill>} />);
 }
 export function ProjectDetails({ id }: { id: string }) {
-  const { data, change, projectScope, setProjectScope } = useDemo();
+  const { data, change, saving, projectScope, setProjectScope } = useDemo();
+  const router = useRouter();
   const [tab, setTab] = useState<typeof projectTabs[number]['value']>('overview');
-  const [modal, setModal] = useState<'edit' | 'task' | 'archive' | null>(null);
+  const [modal, setModal] = useState<'edit' | 'task' | 'resource' | 'doc' | 'archive' | 'delete' | null>(null);
+  const [error, setError] = useState('');
   const project = data.projects.find(p => p.id === id);
   if (!project) return <Empty title="پروژه پیدا نشد" detail="شناسه پروژه را بررسی کنید." action={<LinkButton href="/projects">فهرست پروژه‌ها</LinkButton>} />;
   const tasks = data.tasks.filter(t => t.projectId === id);
@@ -137,19 +140,41 @@ export function ProjectDetails({ id }: { id: string }) {
   const events = data.events.filter(e => e.projectId === id);
   const expenses = data.expenses.filter(e => e.projectId === id);
   const archived = project.status === 'archived';
+  const isOwner = data.users[0]?.role === 'Owner';
+  const canContribute = !archived && (isOwner || data.users[0]?.role === 'Developer');
   const coverage=projectCompleteness(data,project);
 
-  function archive() {
+  function closeModal() {
+    if (saving) return;
+    setError('');
+    setModal(null);
+  }
+
+  async function archive() {
+    setError('');
     const message = archived ? 'پروژه از بایگانی بازگردانده شد.' : 'پروژه بایگانی شد.';
-    change(previous => ({ ...previous, projects:previous.projects.map(p => p.id === id ? { ...p,status:p.status === 'archived' ? p.archivedFrom ?? 'building' : 'archived',archivedFrom:p.status === 'archived' ? undefined : p.status } : p) }), message,
+    const saved = await change(previous => ({ ...previous, projects:previous.projects.map(p => p.id === id ? { ...p,status:p.status === 'archived' ? p.archivedFrom ?? 'building' : 'archived',archivedFrom:p.status === 'archived' ? undefined : p.status } : p) }), message,
       { projectId:id,title:message,source:'پروژه‌ها' });
+    if (!saved) { setError('تغییر وضعیت پروژه تأیید نشد.'); return; }
     if (!archived && projectScope === id) setProjectScope('');
     setModal(null);
   }
+
+  async function deleteProject() {
+    setError('');
+    const saved = await change(previous => ({ ...previous, projects:previous.projects.filter(item => item.id !== id) }),
+      'پروژه حذف شد.');
+    if (!saved) {
+      setError('حذف تأیید نشد. اگر پروژه رکورد یا منبع مشترک دارد، ابتدا ارتباط آن را بررسی کنید.');
+      return;
+    }
+    if (projectScope === id) setProjectScope('');
+    router.replace('/projects');
+  }
   return <>
     <Heading title={<bdi>{project.name}</bdi>} subtitle={`پروژه · ${project.subtitle}`}>
-      {!archived && <Button icon={Plus} onClick={() => setModal('task')}>افزودن وظیفه</Button>}
-      <Button variant="primary" icon={Pencil} onClick={() => setModal('edit')}>ویرایش پروژه</Button>
+      {canContribute && <Button icon={Plus} onClick={() => setModal('task')}>افزودن وظیفه</Button>}
+      {isOwner && <Button variant="primary" icon={Pencil} onClick={() => setModal('edit')}>ویرایش پروژه</Button>}
     </Heading>
     <div className="stack">
       <Panel className="project-cover">
@@ -185,19 +210,30 @@ export function ProjectDetails({ id }: { id: string }) {
         </Panel>
       </>}
       {tab === 'tasks' && <Panel title="وظایف پروژه"><ProjectTaskRows tasks={tasks} /></Panel>}
-      {tab === 'resources' && <Panel title="منابع متصل"><ProjectResourceRows resources={resources} /></Panel>}
-      {tab === 'docs' && <Panel title="مستندات پروژه">{docs.length ? docs.map(d => <Row key={d.id} icon={FolderOpen} title={d.title} href={docHref(d.id)} end={<Pill>{d.type}</Pill>} />) : <Empty title="سندی ثبت نشده است" />}</Panel>}
+      {tab === 'resources' && <Panel title="منابع متصل" action={isOwner && !archived && <Button icon={Plus} onClick={() => setModal('resource')}>افزودن منبع</Button>}><ProjectResourceRows resources={resources} /></Panel>}
+      {tab === 'docs' && <Panel title="مستندات پروژه" action={canContribute && <Button icon={Plus} onClick={() => setModal('doc')}>سند جدید</Button>}>{docs.length ? docs.map(d => <Row key={d.id} icon={FolderOpen} title={d.title} href={docHref(d.id)} end={<Pill>{d.type}</Pill>} />) : <Empty title="سندی ثبت نشده است" />}</Panel>}
       {tab === 'activity' && <Panel title="تاریخچه پروژه">{events.length ? events.map(e => <Row key={e.id} icon={Activity} title={e.title} meta={`${e.actor} · ${e.source} · ${dateLabel(e.date)}`} end={undefined} />) : <Empty title="رویدادی ثبت نشده است" />}</Panel>}
       {tab === 'finance' && <Panel title="هزینه‌های پروژه"><Table label="هزینه‌های پروژه" rows={expenses} columns={[
         {label:'شرح',render:e => e.title}, {label:'مبلغ',render:e => money(e.amount)}, {label:'تاریخ',render:e => dateLabel(e.date)}, {label:'دسترسی',render:() => visibleLink('/finance','همه هزینه‌ها')},
       ]} /></Panel>}
-      <div><Button variant={archived ? 'soft' : 'danger'} icon={Archive} onClick={() => setModal('archive')}>{archived ? 'بازگردانی پروژه' : 'بایگانی پروژه'}</Button></div>
+      {isOwner && <div className="flex flex-wrap gap-2">
+        <Button variant={archived ? 'soft' : 'danger'} icon={Archive} onClick={() => setModal('archive')}>{archived ? 'بازگردانی پروژه' : 'بایگانی پروژه'}</Button>
+        {archived && <Button variant="danger" icon={Trash2} onClick={() => setModal('delete')}>حذف پروژه</Button>}
+      </div>}
     </div>
     {modal === 'edit' && <ProjectForm project={project} onClose={() => setModal(null)} />}
     {modal === 'task' && <TaskForm projectId={id} onClose={() => setModal(null)} />}
-    {modal === 'archive' && <Modal title={archived ? 'بازگردانی پروژه' : 'بایگانی پروژه'} onClose={() => setModal(null)}>
+    {modal === 'resource' && <ResourceForm projectId={id} openServer={false} onClose={() => setModal(null)} />}
+    {modal === 'doc' && <DocForm projectId={id} onClose={() => setModal(null)} />}
+    {modal === 'archive' && <Modal title={archived ? 'بازگردانی پروژه' : 'بایگانی پروژه'} onClose={closeModal}>
       <p className="muted">{archived ? 'پروژه در فهرست جاری دوباره نمایش داده می‌شود.' : 'پروژه از فهرست جاری به فیلتر بایگانی منتقل می‌شود.'}</p>
-      <div className="form-actions mt-4"><Button variant={archived ? 'primary' : 'danger'} onClick={archive}>{archived ? 'بازگردانی' : 'تأیید بایگانی'}</Button><Button onClick={() => setModal(null)}>انصراف</Button></div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="form-actions mt-4"><Button variant={archived ? 'primary' : 'danger'} disabled={saving} onClick={archive}>{archived ? 'بازگردانی' : 'تأیید بایگانی'}</Button><Button disabled={saving} onClick={closeModal}>انصراف</Button></div>
+    </Modal>}
+    {modal === 'delete' && <Modal title="حذف پروژه" onClose={closeModal}>
+      <p className="muted">این کار پروژهٔ بایگانی‌شدهٔ {project.name} را برای همیشه حذف می‌کند. سرور فقط پروژهٔ بدون رکورد وابسته یا منبع مشترک را حذف می‌کند.</p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="form-actions mt-4"><Button variant="danger" disabled={saving} onClick={deleteProject}>تأیید حذف پروژه</Button><Button disabled={saving} onClick={closeModal}>انصراف</Button></div>
     </Modal>}
   </>;
 }

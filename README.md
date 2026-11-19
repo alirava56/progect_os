@@ -28,6 +28,8 @@ npm run test:smoke
 
 Smoke از Build تولید و دیتابیس موقت مستقل برای هر سناریو استفاده می‌کند. در Windows می‌توان مسیر Chrome نصب‌شده را با `PROJECTOS_PLAYWRIGHT_CHROMIUM` تعیین کرد. اجرای یکپارچهٔ PostgreSQL به سرویس آزمایشی loopback و ابزارهای همان نسخهٔ `pg_dump` و `pg_restore` نیاز دارد. توضیح و نتیجهٔ قابلیت‌ها و محدودیت‌ها در [Release Gates](docs/verification/RELEASE-GATES-FA.md) ثبت شده است.
 
+برای تمرین ساخت پروژه از رابط فارسی و ماندگاری داده‌ها پس از توقف برنامه، `PROJECTOS_TEST_POSTGRES_URL` را روی دیتابیس مدیریتی `postgres` در یک سرور محلی آزمایشی تنظیم کنید. پس از Build، دستور `npm run test:project-lifecycle` برای هر سناریو یک دیتابیس جدا می‌سازد و آن را در پایان آزمون پاک می‌کند.
+
 ## راهنماها
 
 - [قرارداد API](docs/architecture/API-CONTRACT.md)

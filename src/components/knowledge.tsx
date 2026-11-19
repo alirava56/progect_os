@@ -1,41 +1,14 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowUpLeft, FileText, FolderOpen, Pencil, Plus, Send } from 'lucide-react';
-import { dateLabel, docHref, matches, newId, now, number } from '@/lib/format';
+import { dateLabel, docHref, matches, newId, number } from '@/lib/format';
 import { useDemo } from '@/lib/store';
-import type { Doc, DocType } from '@/lib/types';
-import { ProjectField, ProjectFilter, SelectOptions, projectName } from './forms';
-import { Art, Button, Callout, Empty, Field, FormActions, Heading, IconButton, Modal, Panel, Pill, SearchField, formValues } from './ui';
-
-const docTypes: DocType[] = ['Runbook','Technical Design','Decision Record','Checklist','Release Notes'];
-
-function DocForm({ onClose, doc, projectId, onSaved }: { onClose: () => void; doc?: Doc; projectId: string; onSaved: (id: string) => void }) {
-  const { change, saving } = useDemo();
-  const [error,setError] = useState('');
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    const get = formValues(event);
-    if (!get('title') || !get('body')) { setError('عنوان و متن سند را وارد کنید.'); return; }
-    const item: Doc = { id:doc?.id ?? newId('doc'), title:get('title'), projectId:get('project'), type:get('type') as DocType,
-      body:get('body'), revision:(doc?.revision ?? 0) + 1, updated:now() };
-    const saved = await change(data => ({...data,docs:doc ? data.docs.map(d => d.id === item.id ? item : d) : [item,...data.docs]}),
-      'مستند ذخیره شد.',{ projectId:item.projectId,title:doc ? 'سند به‌روزرسانی شد' : 'سند جدید ثبت شد',detail:item.title,source:'مستندات' });
-    if (!saved) { setError('ذخیرهٔ سند تأیید نشد.'); return; }
-    onSaved(item.id);
-    onClose();
-  }
-  return <Modal title={doc ? 'ویرایش سند' : 'سند جدید'} onClose={onClose}>
-    <form className="form-stack" onSubmit={submit}>
-      <Field label="عنوان سند"><input autoFocus required name="title" maxLength={90} defaultValue={doc?.title} /></Field>
-      <div className="form-grid"><ProjectField initial={doc?.projectId ?? projectId} /><Field label="نوع سند"><select name="type" defaultValue={doc?.type}><SelectOptions options={docTypes} /></select></Field></div>
-      <Field label="متن سند (بدون رمز و توکن)"><textarea required name="body" rows={8} maxLength={6000} defaultValue={doc?.body} /></Field>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <FormActions onClose={onClose} saving={saving} submit="ذخیره سند" />
-    </form>
-  </Modal>;
-}
+import type { Doc } from '@/lib/types';
+import { DocForm, ProjectFilter, projectName } from './forms';
+import { Art, Button, Callout, Empty, Field, Heading, IconButton, Modal, Panel, Pill, SearchField } from './ui';
 
 export function Docs() {
   const { data, projectScope, setProjectScope } = useDemo();

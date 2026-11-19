@@ -173,3 +173,35 @@ test('project form waits for the server commit before navigation and persists af
   await page.reload();
   await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
 });
+
+test('only an empty archived project can be deleted from its page', async ({page, origin}) => {
+  await bootstrap(page.request, origin);
+  const shared = {id:'shared-vps', name:'Shared VPS', projectId:'hosting', linkedProjectIds:['protected'],
+    type:'server', address:'203.0.113.24', environment:'Staging', status:'registered', provider:'Fixture host', tags:[]};
+  const setup = await page.request.patch('/api/records', {headers:origin, data:{version:0, changes:[
+    create('projects', project('hosting')), create('projects', project('protected')), create('projects', project('empty')),
+    create('resources', shared),
+  ]}});
+  expect(setup.status()).toBe(200);
+
+  for (const id of ['protected', 'empty']) {
+    await page.goto('/projects/' + id);
+    const remove = page.getByRole('button', {name:'حذف پروژه', exact:true});
+    await expect(remove).toHaveCount(0);
+    await page.getByRole('button', {name:'بایگانی پروژه', exact:true}).click();
+    await page.getByRole('button', {name:'تأیید بایگانی', exact:true}).click();
+    await expect(remove).toBeVisible();
+    await remove.click();
+    const dialog = page.getByRole('dialog', {name:'حذف پروژه'});
+    await dialog.getByRole('button', {name:'تأیید حذف پروژه', exact:true}).click();
+    if (id === 'protected') {
+      await expect(dialog.getByRole('alert')).toContainText('حذف تأیید نشد');
+      expect((await page.request.get('/api/records/projects/protected')).status()).toBe(200);
+      expect((await page.request.get('/api/records/resources/shared-vps')).status()).toBe(200);
+      await dialog.getByRole('button', {name:'انصراف', exact:true}).click();
+    } else {
+      await expect(page).toHaveURL(/\/projects$/);
+      expect((await page.request.get('/api/records/projects/empty')).status()).toBe(404);
+    }
+  }
+});

@@ -9,6 +9,7 @@ This source is a hardened private preview, not production-certified.
 - All “DONE” claims require build, test evidence, security rationale and operational configuration proof.
 - PostgreSQL, Vault, production notifications, offsite restore, and final E2E remain open gates.
 - Do not silently skip failing tests, misrepresent monitoring or AI status, or weaken validation to pass CI.
+- Continue development in the Desktop checkout. Push verified commits to the configured GitHub upstream after each change set. Preserve the remote history and keep local test logs, credentials, databases and backups out of pushed commits.
 
 ## Critical security review addendum (2026-11-18)
 
