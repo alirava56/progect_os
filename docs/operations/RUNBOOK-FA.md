@@ -1,3 +1,5 @@
+> راهنمای PostgreSQL و استقرار نسخهٔ جاری در [DEPLOYMENT-FA.md](DEPLOYMENT-FA.md) و [BACKUP-RESTORE-FA.md](BACKUP-RESTORE-FA.md) آمده است. بخش‌های تاریخی زیر برای نسخهٔ SQLite نگهداری شده‌اند.
+
 # راهنمای عملیاتی ProjectOS Hardened — محیط خصوصی
 
 ## پیش‌نیازها

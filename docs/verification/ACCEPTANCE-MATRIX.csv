@@ -1,14 +1,17 @@
 ID,requirement,priority,implementation,test,evidence,status,blocker
-A1,Clean Linux build,P0,Existing lockfile with optional native packages,npm ci and npm run build,evidence-2026-11-18-p0,PASS,Windows and hosted CI remain unverified
-A2,Static and core checks,P0,Typecheck lint core,npm run typecheck lint and test:core,evidence-2026-11-18-p0,PASS,
-A3,Dependency audit,P0,Existing audit gate,npm audit --audit-level=high,evidence-2026-11-18-p0,FAIL,14 high dependency findings in development tree
-A4,Legacy document masking round trip,P0,db.ts,npm run test:core,evidence-2026-11-18-p0,PASS,
-A5,Contract range and comment dates,P0,validation.ts,npm run test:core,evidence-2026-11-18-p0,PASS,
-B1,PostgreSQL runtime and migration rollback,P0,SQLite and PostgreSQL design draft only,,,FAIL,No PostgreSQL runtime or verified migration
-B2,Vault reference read isolation,P0,db.ts and record service,Playwright HTTP,evidence-2026-11-18-p0,PASS,
-B3,Project field and workspace ACL coverage,P0,Workspace and Vault reference checks only,,,FAIL,Project ACL and full permission tests
-C1,Stable identity after removal of colliding source,P0,run-reminders.mjs,npm run test:core,evidence-2026-11-18-p0,PASS,
-C2,Vault recurring schedule real notifications and offsite restore,P0,Private preview worker and local backup only,,,FAIL,Recurring scheduler plus provider staging and full restore
-D1,Deep monitoring GitHub ledger and permission scoped RAG,P1,Private preview integrations and finance,,,FAIL,Advanced implementation and verified providers
-E1,Chromium production smoke,P0,Isolated SQLite and production launcher,npm run test:smoke,evidence-2026-11-18-p0,PASS,
-E2,Full release acceptance,P0,Local subset only,,,FAIL,Accessibility performance SAST hosted CI rollback and staging recovery
+A01,Windows clean install types lint core build,P0,package lock and bundled pg,local npm commands,evidence-2026-11-19,VERIFIED_LOCAL,
+A02,Production build Playwright and isolated database,P0,isolated-app fixture,original nine plus release cases,evidence-2026-11-19,VERIFIED_LOCAL,
+A03,Linux Windows hosted checks and CodeQL,P0,.github/workflows/ci.yml,hosted workflow,FINAL-DELIVERY-REPORT-FA.md,BLOCKED_EXTERNAL,Hosted repository and runner
+A04,Historical demo test suite parity,P1,responsive and workflows retained,legacy diagnostic,FINAL-DELIVERY-REPORT-FA.md,FAIL,Historical fixtures and demo login incompatible with current authentication
+B01,PostgreSQL runtime and SQLite import,P0,sql repository migrations import,test:postgres and test:postgres-http,evidence-2026-11-19,VERIFIED_LOCAL,
+B02,Scoped permission MFA and record concurrency,P0,project grants record versions sessions,core and HTTP negative tests,evidence-2026-11-19,VERIFIED_LOCAL,
+B03,Fully normalized target and environment privilege review,P0,record rows with project FKs,design review,ADR-002-postgres-runtime.md,OPEN,Normalized domain extensions and actual service roles
+C01,Recurring reminder and crash recovery,P0,scheduler and delivery lease,core recurrence and lease,core.test.cjs,VERIFIED_LOCAL,
+C02,Vault provider and real opted-in messaging,P0,KV metadata and Telegram Resend,adapter and queue tests,INTEGRATIONS-FA.md,BLOCKED_EXTERNAL,Staging Vault and delivery accounts
+C03,Encrypted backup and independent restore,P0,encrypted postgres archive,test:postgres,evidence-2026-11-19,VERIFIED_LOCAL,
+C04,Offsite retention and RPO RTO,P0,operator runbook,staging disaster recovery,FINAL-DELIVERY-REPORT-FA.md,BLOCKED_EXTERNAL,Approved offsite and staging environment
+D01,HTTPS machine observations GitHub and memory,P1,metadata routes scoped inputs,mock and HTTP boundaries,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,Provider behavior not certified
+D02,Provider validation for integrations,P1,project bindings and opt-ins,staging integrations,INTEGRATIONS-FA.md,BLOCKED_EXTERNAL,GitHub AI and monitoring staging accounts
+D03,Exact mixed currency accounting,P1,explicit minor units and grouped BigInt totals,core money tests,core.test.cjs,PARTIAL,Invoice payment ledger allocations and sourced FX
+E01,Release security and performance confirmation,P0,HTTP controls axe and smoke,local release tests,evidence-2026-11-19,PARTIAL,Independent security review and full production-like workload
+E02,Operational release and rollback,P0,recovery and migration runbooks,test:postgres rollback and restore,FINAL-DELIVERY-REPORT-FA.md,BLOCKED_EXTERNAL,Approved staging rehearsal and release authorization

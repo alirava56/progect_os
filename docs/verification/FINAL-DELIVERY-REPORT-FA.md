@@ -1,37 +1,61 @@
 # گزارش نهایی تحویل ProjectOS
 
-**۱۸ نوامبر ۲۰۲۶ · نتیجه انتشار Production: NO-GO · صفر از پنج Gate بسته شد.**
+**حکم انتشار Production: NO-GO**
 
-پنج نقص با تغییر سورس و رگرسیون اجراشده اصلاح شدند. خروجی یک نسخهٔ قابل اجرای Private Preview روی Linux است. مدل دادهٔ عملیاتی هنوز SQLite است و تأیید انتشار عمومی، انتقال داده و کار با رمز واقعی صادر نشده است.
+تاریخ اجرای محلی ۱۹ نوامبر ۲۰۲۶، منطقهٔ زمانی تهران. مبنا `ProjectOS-P0-Verified-2026-11-18.zip` با SHA-256 `376662fcef9af1b20ed2f3e421121a85666a1c4aeb32e758e8b69843be83c019` است. اولین Commit محلی `44916a2f5b04212780d11eb410661c8e9742341b` و Commit سورس و تست گزارش‌شده `64359a57cb9a17ddeb2eeb770cea46550a546965` است. این شناسه‌ها در این اجرا از ZIP ساخته شده‌اند.
 
-## مبنا و شواهد اجرا
+سورس تحویلی ۲۰ مسیر Workspace، ۲۱ مسیر API و ۳۲ آیکون اصلی دارد. Git هیچ تغییری در فایل‌های آیکون نسبت به ورودی نشان نداد. عملیات روی کپی سورس و دیتابیس‌ها و حساب‌های موقت انجام شد. اتصال‌های Production، دادهٔ واقعی و استقرار عمومی خارج از اجرا بودند.
 
-- سورس مبنا: `ProjectOS-Security-Hardened-Reviewed-2026-11-18.zip`. SHA-256 آن `7c3eef2a4c3523402f64d6bf701565a973ea187c8c65c25abf05dac0b88ee0e7` است. آرشیو ۱۶۷ فایل داشت. Commit محلی مبنا `b26a56deee771023018559fab1071c2dcd1125d5` و Commit سورس آزموده‌شده `5cf841750f41b2d94461b7842b2096f24b6f545c` است.
-- Baseline روی Debian 13 x86_64 با Node.js 24.22.3، npm 11.9.0 و Next.js 16.4.6 اجرا شد. نصب، TypeScript، ESLint، Core با ۳۱ پاس و Build همگی Exit 0 داشتند. Smoke مبنا در bootstrap با HTTP 403 و Exit 1 متوقف شد. ممیزی کامل npm با Exit 1 و ۱۴ High پایان یافت.
-- نسخهٔ تحویل با Node.js 22.23.5، Next.js 16.4.6 و Chromium Headless 153.0.8010.0 آزموده شد. نصب مرورگر رسمی Playwright در این محیط Zip ناقص داد. Chromium سیستم با خطای ساخت socket متوقف شد. در اجرای موفق، فقط مسیر executable به Headless Chromium جایگزین اشاره می‌کند.
-- همهٔ ۳۲ آیکون PNG و فایل‌های UI فارسی و RTL در سورس حفظ شدند. Smoke روی هر ۲۰ مسیر احراز هویت‌شدهٔ Workspace در عرض‌های ۳۹۰، ۷۶۸ و ۱۴۴۰ پیکسل اجرا شد.
+## Gateها و شواهد
 
-| دستور | نتیجهٔ نسخهٔ تحویل |
-|---|---|
-| `npm ci --include=optional` | Exit 0 |
-| `npm run typecheck` | Exit 0 |
-| `npm run lint` | Exit 0 |
-| `npm run test:core` | Exit 0، ۳۵ پاس، صفر شکست، صفر Skip |
-| `npm run build` | Exit 0 |
-| `PROJECTOS_PLAYWRIGHT_CHROMIUM=/tmp/chromium npm run test:smoke` | Exit 0، ۹ پاس، صفر شکست. روی `next start` و SQLite موقت |
-| `npm audit --audit-level=high` | Exit 1، ۱۴ مورد High در درخت توسعه، مسیرهای وابسته به `picomatch` |
-| `npm audit --omit=dev --audit-level=high --fetch-retries=0 --fetch-timeout=20000` | Exit 0، صفر مورد در زیرمجموعهٔ Runtime در زمان اجرا |
+| Gate | وضعیت | پیاده‌سازی، دستورات و شواهد کد | باقیمانده برای PASS |
+|---|---|---|---|
+| A — تثبیت | **FAIL** | `npm ci --include=optional`، `typecheck`، `lint`، `test:core`، `build`، `test:smoke` در Chrome و WebKit و `npm audit --audit-level=high` روی Windows موفق‌اند. `tests/isolated-app.ts`، `scripts/prepare-e2e.mjs`، `playwright.smoke.config.ts`، `next.config.ts` و `.github/workflows/ci.yml`. | ۲۰ آزمون تاریخی مؤلفه‌های دمو در Build فعلی شکست خوردند. Firefox محلی برای ۴ تست صفحه راه‌اندازی نشد. CI میزبانی‌شدهٔ Windows/Linux و CodeQL در این اجرا **BLOCKED_EXTERNAL** هستند. |
+| B — Backend و امنیت | **FAIL** | PostgreSQL واقعی در Build تولید، ۳ Migration اسکیمای SQL، Import از SQLite، نسخهٔ رکورد، Batch اتمیک، Scope پروژه و فیلد، MFA ثبت/تغییر و مدیریت نشست. `npm run test:postgres`، `npm run test:postgres-http`، Core و HTTP از جمله دو ویرایش مستقل، تضاد هم‌رکورد، Grant، CSRF و Recovery موفق‌اند. `schema/postgres/`، `scripts/sqlite-import.mjs`، `src/lib/server/{db,record-service,auth,mfa,invitations}.ts` و APIهای مرتبط. | مدل دامنه هنوز از payloadهای سازگار رکورد استفاده می‌کند. نرمال‌سازی کامل مدل هدف و RLS باقی‌اند. بررسی نقش واقعی سرویس، تمرین Cutover و Rollback پس از شروع نوشتن در محیط هدف انجام نشده‌اند. |
+| C — Vault، یادآوری و Backup | **BLOCKED** | آداپتر فقط فرادادهٔ HashiCorp KV v2، یادآوری تقویمی، حفظ شناسه، Snooze، Outbox در هر دو موتور، Retry/Lease و Backup/Restore رمزنگاری‌شده. `npm run test:core`، تست Mock Vault و Crash/Lease و `npm run test:postgres` موفق‌اند. `src/lib/server/vault.ts`، `scripts/reminder-scheduler.mjs`، `scripts/notification-delivery.mjs`، `scripts/postgres-archive.mjs`. | Vault، Telegram، Resend و Worker زمان‌بندی‌شده روی Staging **BLOCKED_EXTERNAL** هستند. نگهداشت Offsite و RPO/RTO واقعی **BLOCKED_EXTERNAL** هستند. وضعیت ارسال آزمایشی حد پذیرش ارائه‌دهنده را از خوانده‌شدن جدا می‌کند. |
+| D — قابلیت‌های پیشرفته | **FAIL** | HTTPS و TLS با بررسی DNS، مسیر عامل CPU/RAM دارای زمان و منبع، GitHub خواندنی با وب‌هوک، Scope، Retry، آثار مالی BigInt در واحد جدا و حافظهٔ پروژهٔ Scoped با بررسی گزیده. `npm run test:core` و Smoke HTTP حافظه پاس شدند. `scripts/monitor-probe.mjs`، `src/lib/server/github.ts`، `src/lib/money.ts`، `src/lib/server/project-memory.ts` و APIها. | Ledger مستقل پرداخت، Invoice، تخصیص منابع و FX دارای منبع باقی‌اند. Backfill خودکار GitHub و VPN، DNS SLO و پایش چندنقطه‌ای تکمیل نشده‌اند. تأیید سرویس‌های GitHub، عامل میزبان و مدل AI در محیط آزمایشی **BLOCKED_EXTERNAL** است. |
+| E — تأیید نهایی | **FAIL** | ۱۵/۱۵ سناریو در Chrome و WebKit. ۲۰ مسیر Workspace در سه عرض ۳۹۰، ۷۶۸ و ۱۴۴۰. axe بر ورود و داشبورد، MFA، کنترل نقش، فرم فارسی واقعی، P95 محلی و Restore/Migration/Rollback تراکنشی. `tests/functional.spec.ts`، `tests/release.spec.ts` و `scripts/postgres.test.cjs`. | Firefox و مجموعهٔ تاریخی کامل سبز نیستند. بررسی دستی و سراسری WCAG، load/soak محیط هدف، آزمون امنیت مستقل، اجرای Linux میزبانی‌شده و DR/Cutover بیرونی باقی دارند. |
 
-گزارش اجرای تمیز، خروجی audit و شواهد رگرسیون در [پوشهٔ شواهد](evidence-2026-11-18-p0/) آمده‌اند. دستورهای بازتولید در [راهنمای اجرای خصوصی](../operations/DEPLOYMENT-FA.md)، معیارها در [ماتریس پذیرش](ACCEPTANCE-MATRIX.csv)، مدل فعلی در [ERD](../architecture/ERD.md)، قرارداد در [API Contract](../architecture/API-CONTRACT.md) و شواهد مسیر کد در [ممیزی سورس](../audit/FINAL-SOURCE-AUDIT-FA.md) ثبت شده‌اند.
+## خروجی بازتولیدپذیر
 
-## وضعیت Gateها
+محیط نهایی Windows x64، Node.js 22.23.5، npm 10.9.9، Next.js 16.4.6 و PostgreSQL 17.12 محلی بود. خلاصهٔ Baseline و فهرست تغییرات در [پوشهٔ شواهد](evidence-2026-11-19/) آمده‌اند. لاگ‌های خام این اجرا در نسخهٔ محلی تحویل باقی مانده‌اند.
 
-| Gate | وضعیت | اجرا، فایل‌های تغییرکرده و کار باز |
-|---|---|---|
-| A — تثبیت | **FAIL** | نصب تمیز، Build، TypeScript، ESLint، Core و Chromium محلی سبز هستند. `ci.yml`، `playwright.smoke.config.ts`، `scripts/prepare-e2e.mjs`، `tests/functional.spec.ts` و `scripts/core.test.cjs` تغییر کردند. `db.ts` جلوی بازنویسی ضمنی سند قدیمی ماسک‌شده را می‌گیرد. `validation.ts` مقایسهٔ تاریخ قرارداد و تاریخ کامنت را اصلاح کرد. Audit کامل Exit 1 دارد. CI میزبانی‌شده، Windows و SAST تأیید نشده‌اند. |
-| B — داده و امنیت | **FAIL** | در `db.ts`، `record-service.ts` و `api/state/route.ts` دسترسی خواندن Vault محدود و مسیر ذخیره Editor سازگار شد. رگرسیون HTTP سه نقش را پوشش می‌دهد. دسترسی مستقیم Editor و Viewer به شناسه Vault پاسخ 404 می‌گیرد. مدل PostgreSQL، Migration و Rollback، نسخهٔ رکوردمحور، ACL پروژه، MFA کامل و سناریوهای چند Workspace بازند. |
-| C — Vault، موعد و Backup | **FAIL** | `scripts/run-reminders.mjs` کلید دارای نوع منبع می‌سازد و وضعیت تحویل موعد باقی‌مانده را پس از حذف منابع هم‌نام حفظ می‌کند. رگرسیون Core با SQLite آزمایشی پاس شده است. کلیدهای قدیمی قابل انتساب حفظ می‌شوند. کلیدهای مبهم شمارش می‌شوند و تطبیق و تولید مجدد برای آن گروه خودکار انجام نمی‌شود. مهاجرت جامع تاریخچه، Vault، زمان‌بندی تکرارشونده و Full Restore باقی‌اند. آزمون واقعی Provider و Offsite در وضعیت `BLOCKED_EXTERNAL` است. |
-| D — امکانات پیشرفته | **FAIL** | مسیرهای موجود Monitoring، GitHub، Finance و Assistant در سورس تطبیق داده شدند. رگرسیون مالی HTTP رد مبلغ اعشاری را نشان داد. توسعهٔ عملیاتی Probe، Sync GitHub، Ledger/تسویه و RAG مجوزمحور در این تحویل کامل نشد. اتصال‌های واقعی Staging در وضعیت `BLOCKED_EXTERNAL` هستند. |
-| E — تأیید نهایی | **FAIL** | Smoke تولید، RTL، واکنش‌گرایی، CSRF، Session revoke، نقش‌ها و کنترل مستقیم Vault اجرا شدند. تست‌های محلی Core شامل اعتبار رمز Backup، بازیابی ایزوله و تشخیص دستکاری‌اند. آزمون جامع IDOR چند پروژه و Workspace، WCAG، عملکرد، آزمون بازیابی Staging و Rollback انجام نشده است. تست‌های قدیمی `responsive.spec.ts` و `workflows.spec.ts` در اجرای Smoke شمارش نشده‌اند. |
+| دستور | کد خروج | نتیجه |
+|---|---:|---|
+| `npm ci --include=optional` در کپی تازه از Commit میانی با همین Lockfile | 0 | Windows، وابستگی‌های اختیاری درست نصب شدند. |
+| `npm run typecheck` / `npm run lint` | 0 / 0 | هردو روی سورس و تست جاری موفق. |
+| `npm run test:core` | 0 | ۴۲ موفق از ۴۲، شامل ۳۵ تست اصلی و ۷ رگرسیون جدید. هیچ مورد Skip نشد. |
+| `npm run build` | 0 | Build تولید. بسته‌بندی `pg` مشکل Junction در Windows را رفع کرد. |
+| `npm run test:smoke` با Chrome 157.0.8103.79 نصب‌شده | 0 | ۱۵ موفق، شامل هر ۹ آزمون Smoke قبلی. |
+| `npm run test:smoke -- --browser=webkit` با TLS موقت loopback | 0 | ۱۵ موفق. هر ۴ مسیر مرتبط با مرورگر واقعی اجرا شد. |
+| `npm run test:smoke -- --browser=firefox` با همان TLS و پوشهٔ موقت مستقل | 1 | ۱۱ تست API موفق، ۴ تست نیازمند مرورگر با خطای شروع فرایند Firefox متوقف شدند. |
+| `npm audit --audit-level=high` | 0 | صفر مورد در خروجی همین رجیستری و تاریخ. |
+| `npm run test:postgres` | 0 | ۱ آزمون یکپارچهٔ ترتیبی. هش و شمارش Import، اجرای دوباره، Failure قبل از Commit، احراز هویت، هم‌زمانی، آرشیو و Restore به دیتابیس خالی آزموده شدند. |
+| `npm run test:postgres-http` | 0 | Build تولید PostgreSQL را واقعاً برای Health، Setup و عملیات رکوردی استفاده کرد. |
+| `npx playwright install chromium firefox webkit` | 1 | دانلود Chromium با 403 رجیون متوقف شد. Chrome نصب‌شده برای اجرا استفاده شد. |
+| `npx playwright install firefox webkit` | 0 | دو موتور دریافت شدند. نتیجهٔ اجرای خود Firefox در ردیف جدا آمده است. |
+| Playwright با `responsive.spec.ts` و `workflows.spec.ts` در سرور موقت Build تولید | 1 | ۱۹ شکست ثبت شدند و فراخوانی مجموعه به سقف زمانی رسید. سناریوی بیستم با `-g "demo login"` جداگانه اجرا شد و exit 1 داشت. مثال شاهد، انتظار دکمهٔ «ورود به حساب نمایشی» و مسیرهای نمونه بدون نشست معتبر است. |
 
-دادهٔ آزمایشی استفاده شد. هیچ ارائه‌دهندهٔ عملیاتی، دیتابیس واقعی، استقرار عمومی یا دادهٔ تولید وارد فرایند اجرا نشد. فایل SQL موجود فقط پیش‌نویس است. این تحویل Migration عملیاتی SQLite به PostgreSQL یا رویهٔ Rollback تأییدشده ندارد.
+آزمون‌های آداپتر Vault، محدودیت نرخ GitHub و رد DNS خصوصی با پاسخ کنترل‌شده و در وضعیت `MOCK_ONLY` بودند. اتصال پیام‌رسان، مدل و حساب واقعی GitHub فعال نشد. Worker Lease محلی پس از انقضا بازیابی شد و تلاش قبلی اجازهٔ Commit نتیجهٔ جدید را نداشت. تحویل خارجی همچنان از الگوی حداقل یک‌بار و پذیرش ارائه‌دهنده استفاده می‌کند.
+
+P95 گرد‌شده در Chrome و WebKit هر دو **۶۸ ms** بود. بار آزمون فقط ۵۰ درخواست خواندن Snapshot، هم‌زمانی ۵ و ۶۱ رکورد ساختگی در SQLite موقت بود. این اندازه‌گیری مبنای SLA یا ظرفیت PostgreSQL نیست. axe فقط روی صفحهٔ ورود و داشبورد اجرا شد.
+
+### بازتولید TLS مرورگر
+
+برای سناریوهای loopback، WebKit در HTTP ممکن است Cookie دارای پیشوند `__Host-` را نپذیرد. Fixture فعلی امکان آزمون HTTPS با گواهی موقت اختصاصی را دارد. گواهی یا کلید محیط واقعی را استفاده نکنید. کلید در ZIP سورس وجود ندارد. گزینهٔ پذیرش گواهی خودامضا محدود به Context آزمایشی HTTPS روی 127.0.0.1 است.
+
+```shell
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=ProjectOS Loopback Test" -addext "subjectAltName=IP:127.0.0.1" -keyout loopback.key -out loopback.crt
+```
+
+مسیر مطلق دو فایل موقت را در `PROJECTOS_TEST_TLS_KEY` و `PROJECTOS_TEST_TLS_CERT` بگذارید و `npm run test:smoke -- --browser=webkit` را اجرا کنید. در این اجرا گواهی با Python Cryptography ساخته شد و همین قرارداد PEM را استفاده کرد. برای PostgreSQL، `PROJECTOS_TEST_POSTGRES_URL` به دیتابیس مدیریتی `postgres` روی loopback و یک Cluster آزمایشی اشاره می‌کند. تست تنها دیتابیس‌هایی با نام تولیدشده از Prefix آزمایشی خودش می‌سازد و جمع می‌کند.
+
+## تحویل‌ها
+
+- [ممیزی سورس](../audit/FINAL-SOURCE-AUDIT-FA.md) و [ماتریس پذیرش](ACCEPTANCE-MATRIX.csv)
+- [ERD](../architecture/ERD.md)، [تصمیم معماری](../architecture/ADR-002-postgres-runtime.md) و [قرارداد API](../architecture/API-CONTRACT.md)
+- [ماتریس مجوز](../security/AUTHZ-MATRIX.md)، [مدل تهدید](../security/THREAT-MODEL.md) و [آزمون‌های امنیتی](../security/SECURITY-TEST-RESULTS.md)
+- [Migration و Rollback](../migrations/SQLITE-TO-POSTGRES-FA.md)، [استقرار](../operations/DEPLOYMENT-FA.md)، [Backup و بازیابی](../operations/BACKUP-RESTORE-FA.md) و [اتصال‌ها](../operations/INTEGRATIONS-FA.md)
+- [فهرست تغییرات سورس و آزمون‌ها](evidence-2026-11-19/CHANGED-FILES.txt)
+
+اسناد تحویل از نتایج تاریخی ZIP ورودی جدا ثبت شدند. وضعیت همهٔ Gateها در جدول بالا معتبر است و انتشار عمومی برای این تحویل در وضعیت **NO-GO** باقی می‌ماند.

@@ -1,22 +1,23 @@
-# تطبیق یافته‌های ممیزی ProjectOS با سورس
+# ممیزی مستقل سورس ProjectOS
 
-مبنا فایل `ProjectOS-Security-Hardened-Reviewed-2026-11-18.zip` با ۱۶۷ فایل است. ادعای «رفع» در جدول به تغییر همین نسخه و آزمون ثبت‌شده محدود است.
+مبنای مقایسه، ZIP تأییدشدهٔ P0 است. شواهد اجرای جاری و موارد باز در [گزارش تحویل](../verification/FINAL-DELIVERY-REPORT-FA.md) آمده‌اند.
 
-| یافته | وضعیت | شاهد سورس و آزمون |
+| شناسهٔ ممیزی | یافتهٔ تطبیق‌داده‌شده و اقدام | شاهد |
 |---|---|---|
-| QA-01 / DOC-01 | جزئی | نصب تمیز و Build بومی Linux موفق. `playwright.smoke.config.ts` و `scripts/prepare-e2e.mjs` از Build تولید و SQLite موقت استفاده می‌کنند. ممیزی وابستگی توسعه هنوز قرمز است. |
-| SEC-02 / Read→Write | رفع رگرسیون گزارش‌شده | `db.ts / saveState` مقایسه را با نمای ماسک‌شده انجام می‌دهد. سند بدون تغییر وارد تاریخچه نمی‌شود. `core.test.cjs` خطای قبلی و حفاظت از محتوای اصلی و زمان ثبت را پوشش می‌دهد. رمزهای قدیمی باقی‌مانده مسیر پاک‌سازی آفلاین دارند. |
-| تاریخ قرارداد و کامنت | رفع دو نقص | `validation.ts / parseState, parseField` تاریخ کامنت را اعتبارسنجی و زمان قرارداد را برحسب UTC مقایسه می‌کند. دو تست ابتدا شکست خوردند و بعد از اصلاح پاس شدند. |
-| CORE-01 | باز | `db.ts / getDb` به `node:sqlite` متصل است. `POSTGRES-TARGET-DRAFT.sql` پیش‌نویس مدل است. |
-| CORE-02 | باز | `store.tsx / DemoProvider` و `record-service.ts / mutateRecord` نسخه سراسری Workspace و اعتبارسنجی Snapshot را استفاده می‌کنند. |
-| ACCESS-01 | جزئی | `db.ts / readState` ارجاع Vault و رویداد مرتبط را فقط در پاسخ Owner می‌دهد. رگرسیون HTTP پاسخ Snapshot، رکورد مستقیم و HTML را می‌آزماید. ACL پروژه پیاده نشده است. |
-| ACCESS-02 | باز | `invitations.ts / acceptInvitation` عضویت فعال دوم را رد می‌کند. `db.ts / accountByUser` تنها یک ردیف عضویت می‌خواند. |
-| AUTH-01 | باز | `auth.ts / authenticate` قفل حساب و `lookupSessionUserId` انقضا دارند. Session revoke و RBAC محدود روی HTTP تست شده‌اند. مابقی چرخه هویت و ضد سوءاستفاده باز است. |
-| SEC-01 | باز | `vault-link.ts` فقط ارجاع HTTPS را اعتبارسنجی می‌کند. Provider واقعی وجود ندارد. |
-| REM-01 / REM-02 | جزئی | `run-reminders.mjs` شناسهٔ جدید را همواره از نوع منبع و موعد می‌سازد و حذف منابع هم‌نام وضعیت تحویل منبع باقی‌مانده را بازنویسی نمی‌کند. موارد تاریخی بدون انتساب مطمئن در شمارندهٔ `ambiguousLegacy` دیده می‌شوند. تکرار، مهاجرت جامع و زمان‌بندی عملیاتی بازند. |
-| MSG-01 | باز | `deliver-notifications.mjs` فراخوانی Provider و ثبت تحویل را در دو مرحله انجام می‌دهد. ارسال واقعی و بازیابی پس از Crash بررسی نشده‌اند. |
-| DR-01 | باز | آزمون هسته، فرمت محلی v1 و تشخیص دستکاری را اجرا می‌کند. بازسازی Staging و Offsite باقی است. |
-| MON-01 | باز | `run-monitors.mjs` پروب HEAD HTTPS و API حالت stale دارند. داده CPU/RAM، VPN، DNS/SSL عملیاتی نداریم. |
-| INT-01 | باز | مسیر `api/integrations/github` خواندنی و allowlist-based است. Sync و Webhook پیاده نشده‌اند. |
-| FIN-01 | باز | `finance.tsx` واحدهای مالی را نمایش می‌دهد. تطبیق پرداخت، Ledger و گزارش ارزی کامل نشده‌اند. اعتبارسنجی مبلغ اعشاری در HTTP اجرا شده است. |
-| AI-01 | باز | `api/assistant` جست‌وجوی کلمه‌ای و فراخوانی اختیاری دارد. ACL پروژه و راستی‌آزمایی استناد و ارزیابی مدل باقی است. |
+| CORE-01 | SQLite مسیر قبلی بود. PostgreSQL در درخواست واقعی HTTP و ابزار Import به Runtime متصل شد. | `scripts/database.mjs`، `schema/postgres/`، `test:postgres` و `test:postgres-http` |
+| CORE-02 | UI قبلی Snapshot می‌نوشت. UI اکنون Batch رکورد و کنترل نسخهٔ رکورد را به کار می‌گیرد. دو تغییر مستقل و Rollback جزیی آزموده شدند. | `src/lib/store.tsx`، `src/lib/server/record-service.ts`، `tests/release.spec.ts` |
+| ACCESS-01 | Snapshot و بعضی APIها فقط دامنهٔ Workspace داشتند. Scope پروژه، فیلد Vault و History اعمال شدند. | `src/lib/server/db.ts`، History، تست منفی HTTP |
+| ACCESS-02 | یک عضویت فعال با قید یکتا اعمال شد و انتخاب تصادفی Workspace از Query حذف شد. | `001_initial.sql`، `scripts/sqlite.mjs`، `src/lib/server/invitations.ts` |
+| SEC-01 | پیوندهای قدیمی Vault حفظ شدند. آداپتر KV v2 فقط endpoint فراداده را می‌خواند. اتصال HashiCorp آزمایشی وابسته به محیط بیرونی است. | `src/lib/server/vault.ts` و `/api/vault/[id]` |
+| SEC-02 | رکورد قدیمی مشکوک در ویرایش غیرمرتبط حفظ می‌شود. تغییر مستقیم نیازمند رسیدگی آفلاین است و Import دادهٔ علامت‌خورده را متوقف می‌کند. پوشش الگوها محدود است. | گارد ذخیره، `sqlite-import.mjs` و رگرسیون P0 |
+| AUTH-01 | محدودیت ورود پایدار و بدون قفل سراسری حساب، MFA اجباری برای استقرار خارج از loopback و Rotation نشست اضافه شد. | `auth.ts`، `mfa.ts` و تست HTTP Recovery |
+| REM-01 / REM-02 | شناسهٔ پایدار و سازگاری قبلی حفظ شد. Scheduler روی هر دو DB، تکرار، zone و Snooze را پردازش می‌کند. | `reminder-scheduler.mjs` و تست‌های ۲۶، ۲۷ و DST |
+| MSG-01 | Lease، Retry و حالت نهایی `failed` پیاده شدند. پذیرش ارائه‌دهنده با رسید خواندن یکی نیست. | `notification-delivery.mjs`، تست Crash/Lease |
+| DR-01 | PostgreSQL Backup رمزنگاری‌شده و Restore در مقصد تازه را پاس کرد. Offsite و RPO/RTO محیط هدف باقی‌اند. | `postgres-archive.mjs` و `test:postgres` |
+| MON-01 | HTTPS به IP عمومی ثابت‌شده، TLS و منبع مشاهده مجهز شد. عامل میزبان CPU/RAM را گزارش می‌دهد. VPN، DNS SLO و چندنقطه‌ای بازند. | `monitor-probe.mjs` و `report-monitor-agent.mjs` |
+| INT-01 | نگاشت Repo/Project، Sync خواندنی، Retry و اعتبارسنجی Webhook اجرا شدند. بستن چرخهٔ خودکار Webhook به Backfill و آزمون GitHub آزمایشی باز است. | `github.ts`، API وب‌هوک و تست Mock |
+| FIN-01 | واحدهای پایه و جمع دقیق BigInt جدا شدند. واردات دادهٔ قدیمی دلار را حفظ می‌کند. Ledger پرداخت مستقل، Invoice، تخصیص منابع مشترک و FX دارای منبع بازند. | `money.ts`، `finance.tsx` و رگرسیون CSV |
+| AI-01 | بازیابی پیش از ارسال Scoped است. رضایت همان پرسش لازم است و خروجی با گزیدهٔ منبع تطبیق داده می‌شود. ارزیابی سرویس بیرونی باز است. | `project-memory.ts`، `/api/assistant` و تست استناد |
+| QA-01 / DOC-01 | تست‌های موجود بازاجرا شدند. Smoke ایزوله، HTTP، axe و اندازه‌گیری محلی اضافه شدند. CI میزبانی‌شده هنوز باید اجرا شود. | شواهد Windows، `ci.yml` و گزارش تحویل |
+
+هیچ نتیجهٔ قبلی برای PASS نشانه‌گذاری نشده است. گزارش‌ها، ۳۲ فایل PNG ورودی و آزمون‌های قبلی در شاخهٔ محلی منشأ مشخص دارند.
