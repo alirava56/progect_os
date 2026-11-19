@@ -1,7 +1,7 @@
-import { expect, request as requests, type APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { totp } from '../src/lib/server/mfa';
-import { test, setupToken, type Origin } from './isolated-app';
+import { test, setupToken, testRequest, type Origin } from './isolated-app';
 
 const email='release-owner@example.test', password='synthetic-release-test-password';
 const credentials={email,password};
@@ -56,7 +56,7 @@ test('project grants govern snapshots, direct record reads, document history and
   const memberEmail='limited-editor@example.test';
   const invite=await request.post('/api/team/invitations',{headers:origin,data:{email:memberEmail,role:'editor',projectIds:['visible']}});
   expect(invite.status()).toBe(200);
-  const member=await requests.newContext({baseURL:appURL});
+  const member=await testRequest(appURL);
   try {
     const accepted=await member.post('/api/auth/accept-invite',{headers:origin,data:{
       token:(await invite.json()).token,email:memberEmail,password,displayName:'Limited editor',
@@ -94,7 +94,7 @@ test.describe('required second factor',()=>{
     expect(start.status()).toBe(200);
     const {secret}=await start.json();
     const factor=totp(secret);
-    const other=await requests.newContext({baseURL:appURL});
+    const other=await testRequest(appURL);
     try {
       expect((await other.post('/api/auth/login',{headers:origin,data:credentials})).status()).toBe(200);
       expect((await other.post('/api/auth/mfa',{headers:origin,data:{action:'confirm',code:factor}})).status()).toBe(422);

@@ -2,10 +2,14 @@ import { fork } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { test as playwright } from '@playwright/test';
+import { request, test as playwright } from '@playwright/test';
 
 export const setupToken = 'this-is-a-public-test-only-token-not-a-secret';
 export type Origin = { Origin: string; 'Sec-Fetch-Site': 'same-origin' };
+const testTls = (appURL: string) => appURL.startsWith('https://127.0.0.1:');
+export function testRequest(appURL: string) {
+  return request.newContext({baseURL:appURL,ignoreHTTPSErrors:testTls(appURL)});
+}
 
 export const test = playwright.extend<{ appURL: string; origin: Origin; enforceMfa: boolean }>({
   enforceMfa: [false, { option:true }],
@@ -21,6 +25,8 @@ export const test = playwright.extend<{ appURL: string; origin: Origin; enforceM
         PROJECTOS_REQUIRE_MFA: enforceMfa ? 'enabled' : 'disabled',
         PROJECTOS_SETUP_TOKEN: setupToken,
         PROJECTOS_MFA_ENCRYPTION_KEY: '35'.repeat(32),
+        PROJECTOS_TEST_TLS_KEY: process.env.PROJECTOS_TEST_TLS_KEY ?? '',
+        PROJECTOS_TEST_TLS_CERT: process.env.PROJECTOS_TEST_TLS_CERT ?? '',
         PROJECTOS_GITHUB_TOKEN: '',
         PROJECTOS_AI_ENABLED: 'disabled',
         PROJECTOS_TELEGRAM_NOTIFICATIONS: 'disabled',
@@ -36,7 +42,7 @@ export const test = playwright.extend<{ appURL: string; origin: Origin; enforceM
         const timer = setTimeout(() => fail(new Error(`Test server startup timed out\n${logs}`)), 35_000);
         server.once('message', (message: { url?: unknown }) => {
           clearTimeout(timer);
-          if (typeof message.url === 'string' && /^http:\/\/127\.0\.0\.1:\d+$/.test(message.url)) {
+          if (typeof message.url === 'string' && /^https?:\/\/127\.0\.0\.1:\d+$/.test(message.url)) {
             ready(message.url);
           } else {
             fail(new Error('Invalid test server endpoint'));
@@ -59,5 +65,6 @@ export const test = playwright.extend<{ appURL: string; origin: Origin; enforceM
     }
   },
   baseURL: async ({ appURL }, provide) => { await provide(appURL); },
+  ignoreHTTPSErrors: async ({ appURL }, provide) => { await provide(testTls(appURL)); },
   origin: async ({ appURL }, provide) => { await provide({ Origin: appURL, 'Sec-Fetch-Site': 'same-origin' }); },
 });

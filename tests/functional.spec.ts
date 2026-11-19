@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
-import {expect,request as isolatedRequest, type APIRequestContext} from '@playwright/test';
-import {test, setupToken, type Origin} from './isolated-app';
+import {expect,type APIRequestContext} from '@playwright/test';
+import {test, setupToken, testRequest, type Origin} from './isolated-app';
 import {routes} from './routes';
 const credentials={email:'e2e.owner@example.test',password:'test-password-for-e2e-only-2026'};
 async function createProject(request:APIRequestContext, origin:Origin, name='پروژه ماندگار'){
@@ -14,7 +14,7 @@ async function createProject(request:APIRequestContext, origin:Origin, name='پ�
   return id;
 }
 test.beforeEach(async({appURL,origin})=>{
-  const guest=await isolatedRequest.newContext({baseURL:appURL});
+  const guest=await testRequest(appURL);
   try {
     const response=await guest.post('/api/auth/setup',{headers:origin,data:{
       setupToken,email:credentials.email,password:credentials.password,
@@ -65,7 +65,7 @@ authenticated('CSRF and unauthorized mutations fail closed',async({signedIn,appU
   const current=await signedIn.get('/api/state');const payload=await current.json();
   const cross=await signedIn.put('/api/state',{headers:{Origin:'https://evil.example','Sec-Fetch-Site':'cross-site'},data:payload});
   expect(cross.status()).toBe(403);
-  const guest=await isolatedRequest.newContext({baseURL:appURL});
+  const guest=await testRequest(appURL);
   try{
     expect((await guest.get('/api/state')).status()).toBe(401);
   }finally{await guest.dispose();}
@@ -124,7 +124,7 @@ authenticated('invite-only Viewer has scoped read access but cannot write or inv
   const invitation=await signedIn.post('/api/team/invitations',{headers:origin,data:{email:'viewer.e2e@example.test',role:'viewer'}});
   expect(invitation.status()).toBe(200);
   const {token}=await invitation.json();
-  const viewer=await isolatedRequest.newContext({baseURL:appURL});
+  const viewer=await testRequest(appURL);
   try{
     const accepted=await viewer.post('/api/auth/accept-invite',{headers:origin,data:{token,email:'viewer.e2e@example.test',displayName:'Viewer E2E',password:'viewer-secure-password-2026'}});
     expect(accepted.status()).toBe(200);
@@ -141,7 +141,7 @@ authenticated('Editor can modify tasks but not infrastructure or workspace prefe
   const invitation=await signedIn.post('/api/team/invitations',{headers:origin,data:{email:'editor.e2e@example.test',role:'editor'}});
   expect(invitation.status()).toBe(200);
   const {token}=await invitation.json();
-  const editor=await isolatedRequest.newContext({baseURL:appURL});
+  const editor=await testRequest(appURL);
   try{
     const accepted=await editor.post('/api/auth/accept-invite',{headers:origin,data:{token,email:'editor.e2e@example.test',displayName:'Editor E2E',password:'editor-secure-password-2026'}});
     expect(accepted.status()).toBe(200);
@@ -170,7 +170,7 @@ authenticated('Vault reference metadata is visible only to Owners on state and r
     const invitation=await signedIn.post('/api/team/invitations',{headers:origin,data:{email,role}});
     expect(invitation.status()).toBe(200);
     const {token}=await invitation.json();
-    const member=await isolatedRequest.newContext({baseURL:appURL});
+    const member=await testRequest(appURL);
     try{
       const response=await member.post('/api/auth/accept-invite',{headers:origin,data:{
         token,email,displayName:'E2E member',password:'member-test-password-only-2026',
