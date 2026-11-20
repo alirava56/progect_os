@@ -18,6 +18,7 @@ const email = 'lifecycle-owner@example.test';
 const password = 'synthetic-lifecycle-e2e-password';
 
 const pgTest = test.extend<{ app: { url: string; restart(): Promise<string> } }>({
+  ignoreHTTPSErrors: async ({app},provide) => { await provide(app.url.startsWith('https://127.0.0.1:')); },
   app: async ({playwright}, provide) => {
     const adminUrl = new URL(process.env.PROJECTOS_TEST_POSTGRES_URL ?? 'file:/');
     if (!['postgres:', 'postgresql:'].includes(adminUrl.protocol)

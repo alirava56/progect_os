@@ -21,7 +21,7 @@
 | اعتبارسنجی آفلاین آرشیو و بازیابی فاکتور و پرداخت | `IMPLEMENTED_AND_VERIFIED` | `npm run verify:postgres-backup` اصالت، جدول‌های لازم و خواندن داده‌های آرشیو را بررسی می‌کند. در `test:postgres` آرشیو ناقص و دادهٔ نامعتبر رد شدند. یک Restore جداگانه پرداخت و وضعیت ابطال فاکتور را از Backup بازیابی کرد. |
 | آزمون‌های تاریخی روی ورود واقعی و دیتابیس ایزوله | `IMPLEMENTED_AND_VERIFIED` | هر ۱۳ سناریو در `npm run test:workflows` با Chrome پاس شدند. آزمون‌ها جست‌وجو، ناوبری موبایل، پروژه، وظیفه، منبع، Vault، تقویم، پایش، هشدار، مالی، سند، فعالیت و دعوت را پوشش می‌دهند. اجرای جداگانه در CI فعال است. |
 | فیلتر زمانی و تلاش مجدد پایش و ثبت اتمیک فعالیت با وظیفه | `IMPLEMENTED_AND_VERIFIED` | فیلتر فقط مشاهدات دریافتی دارای زمان را نمایش می‌دهد. وضعیت قدیمی و خطای دریافت در مرورگر با پاسخ آزمایشی بررسی شدند. `test:postgres-http` ثبت رویداد و وظیفه، رد ورودی نامعتبر و محدودیت خواندن وظیفه را تأیید کرد. |
-| پذیرش کل فاز ۱ | `PARTIAL` | سناریوهای اصلی ماندگاری و روال‌های جدید سبز هستند. تکمیل پوشش مجموعه‌های تاریخی و یکپارچگی همهٔ فرم‌ها باز است. |
+| پذیرش سه سناریوی اصلی فاز ۱ | `IMPLEMENTED_AND_VERIFIED` | NovaGuard، باشگاه و MOKMOK در آزمون ثبت داده، بازخوانی، Restart و ورود دوباره موفق بودند. پوشش عمومی رابط در Gate E ثبت شده است. |
 
 `npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ ۲۷‌تایی در Chrome و Firefox سبز شد. WebKit ابتدا یکی از آزمون‌های RTL را با خطای Prefetch هنگام جابه‌جایی اجباری ثبت کرد. آزمون مرور هر مسیر را به سند جدا منتقل کرد و مسیر ۳۹۰ پیکسل در دو اجرای پی‌درپی موفق شد. ۱۳ آزمون تاریخی Workflow همچنان از الگوی دمو استفاده می‌کنند و برای این نسخه تأیید نشده‌اند.
 
@@ -45,14 +45,23 @@ Job یکپارچهٔ Migration و بازیابی PostgreSQL 16 پس از اصل�
 
 در نسخهٔ Workflow کامل، Chrome و Firefox هر کدام ۴۵/۴۵ و WebKit ۴۲/۴۵ نتیجه داشتند. هر چهار Job CI همراه با ۱۳ Workflow پاس شدند. سه شکست WebKit مربوط به بازگرداندن فوکوس جست‌وجو، اعمال فیلتر تاریخ بعد از ثبت هزینه و آمادگی فرم دعوت بودند. پس از اصلاح، هر سه سناریو به‌همراه نرخ تبدیل در اجرای هدفمند WebKit پاس شدند. [CI Workflow کامل](https://github.com/alirava56/progect_os/actions/runs/44703496614)
 
+### بازآزمایی روی نسخهٔ انتشار خصوصی
+
+- Commit سورس `0f81568` همراه با ساخت Migration 006 در GitHub Actions چهار Job موفق داشت. Windows و Ubuntu نصب تمیز، TypeScript، ESLint، Core، بررسی وابستگی، Build، Smoke و ۱۳ Workflow را اجرا کردند. PostgreSQL 16 آزمون Migration، Backup، Restore، HTTP و سه چرخهٔ ماندگاری پروژه را پاس کرد. CodeQL هم اجرا شد. [اجرای CI](https://github.com/alirava56/progect_os/actions/runs/44705562774)
+- `npx playwright test --config=playwright.config.ts --browser=chromium`، همان فرمان با `--browser=firefox` و همان فرمان با `--browser=webkit`، هر کدام ۴۶/۴۶ نتیجهٔ موفق داشتند. مجموعه شامل ۳۳ Smoke/Release و ۱۳ Workflow است. ۲۱ مسیر فارسی در شش اندازهٔ ۳۶۰، ۳۹۰، ۷۶۸، ۱۰۲۴، ۱۴۴۰ و ۱۹۲۰ بررسی شدند.
+- در Windows با Node.js 24.18.0، `npm run test:core` با ۴۷/۴۷ موفق شد. مقایسه با ZIP رسمی نشان داد ۳۵ سناریوی Core اصلی و ۹ سناریوی Smoke اولیه هنوز در مجموعه حضور دارند. پوشش ورود نمایشی به سناریوی ورود واقعی، رد ورود ناموفق و ذخیرهٔ Onboarding منتقل شد.
+- `npm run test:postgres` روی PostgreSQL 17.12 با یک سناریوی ترتیبی کامل و `npm run test:postgres-http` روی Build تولید موفق بودند. آزمون Restore دوم، فاکتور، پرداخت و نرخ دارای منبع را پس از بازیابی بررسی کرد. `npm run test:project-lifecycle -- --workers=1` با TLS لوکال هر سه سناریو را پاس کرد. تنظیم اعتبار گواهی آزمایشی فقط برای نشانی Loopback در `tests/project-lifecycle.spec.ts` اعمال می‌شود.
+- بررسی SQLite روی نسخهٔ کاملاً ساختگی با `backup`، `verify:backup`، `test:restore`، `backup:encrypted` و `verify:encrypted-backup` موفق بود. در آزمون Restore یک Workspace و یک پروژه بازیابی شدند و بررسی کلید خارجی خطا نداشت.
+- مقایسهٔ `public/` با مبنای ZIP هیچ تغییری در ۳۲ آیکون نشان نداد. `npm audit --audit-level=high` برای وابستگی‌های قفل‌شده خطایی گزارش نکرد. اجرای Build و آزمایش‌ها در این مرحله با داده و سرویس آزمایشی انجام شد.
+
 ### وضعیت جاری Gateها
 
 | Gate | وضعیت | آخرین شواهد و مسیرها | شرط باقی‌مانده |
 |---|---|---|---|
-| A | **BLOCKED** | `npm run lint`، `npm run typecheck`، `npm run build`، Core با ۴۷ نتیجه، CI کل Workflowها و WebKit هدفمند با ۴ نتیجهٔ موفق پس از اصلاح. | تأیید اجرای یکپارچهٔ آخرین سورس پس از اصلاح WebKit. |
+| A | **PASS** | `npm run lint`، `npm run typecheck`، `npm run build`، ۴۷/۴۷ Core، ۴۶/۴۶ در هر یک از Chrome، Firefox و WebKit و چهار Job موفق CI. ۳۵ Core و ۹ Smoke اصلی حفظ و بازآزمایی شدند. | بسته شد. |
 | B | **FAIL** | Auth، MFA، CSRF، Grant و هم‌زمانی در Core و HTTP. `npm run test:postgres`، `npm run test:postgres-http` و Migrationهای `schema/postgres/` تا ۰۰۶. | نرمال‌سازی کامل مدل هدف، سیاست PostgreSQL RLS، مرور مجوز حساب سرویس و تمرین Cutover و Rollback محیط هدف. |
 | C | **BLOCKED** | Lease و بازیابی پس از قطع Worker در Core، آزمون قرارداد Vault، تحویل Mock، سلامت آفلاین و Restore جداگانه در `test:postgres` و `scripts/postgres-archive.mjs`. | `BLOCKED_EXTERNAL` برای Vault و ارائه‌دهندگان ارسال در Staging، Timer محیط هدف، نگهداری Offsite و سنجش RPO/RTO. |
-| D | **FAIL** | عامل دیسک، GitHub با Backfill محدود، فاکتور و پرداخت، نرخ تبدیل دستی و ادامهٔ کار مجوزمحور در Build، Core، PostgreSQL و Playwright. `src/lib/server/project-memory.ts`، `src/components/invoice-ledger.tsx`، `src/components/exchange-rates.tsx` و `scripts/verify-postgres-http.mjs`. | جست‌وجوی معنایی، دریافت خودکار نرخ، تطبیق تسویهٔ قرارداد، پایش VPN/SLO و Backfill خودکار. آزمون حساب‌های خارجی مدل، GitHub و پایش در وضعیت `BLOCKED_EXTERNAL` است. |
+| D | **FAIL** | عامل دیسک، GitHub با Backfill محدود، فاکتور و پرداخت، نرخ تبدیل دستی و ادامهٔ کار مجوزمحور در Build، Core، PostgreSQL و Playwright. `src/lib/server/project-memory.ts`، `src/components/invoice-ledger.tsx`، `src/components/exchange-rates.tsx` و `scripts/verify-postgres-http.mjs`. | جست‌وجوی معنایی، دریافت خودکار نرخ، سهم‌بندی هزینهٔ مشترک، تطبیق تسویهٔ قرارداد، پایش VPN/SLO و Backfill خودکار. آزمون حساب‌های خارجی مدل، GitHub و پایش در وضعیت `BLOCKED_EXTERNAL` است. |
 | E | **FAIL** | ۲۱ مسیر RTL در شش عرض، ۱۳ Workflow تاریخی، axe روی ورود و داشبورد، آزمون Postgres مهاجرت و بازیابی و مرزهای دسترسی و هم‌زمانی HTTP. | بررسی دستی WCAG 2.2 AA، ممیزی مستقل، بار پایدار محیط هدف و DR/Cutover آزمایشی. |
 
 گزارش تاریخی ۱۹ نوامبر در ادامه حفظ شده است. وضعیت جاری هر Gate در جدول بالا ثبت شده است و حکم انتشار Production **NO-GO** است.
