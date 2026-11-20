@@ -184,6 +184,18 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
         "SELECT pg_backend_pid()::text || ':' || extract(epoch FROM transaction_timestamp())::text AS binding");
       const mac=createHmac('sha256',scopeKey).update(binding+':'+owner.workspaceId).digest('hex');
       await identityProbe.query("SELECT set_config('projectos.workspace_mac',$1,true)",[mac]);
+      const claims=JSON.stringify({role:'viewer',projects:['alpha']});
+      const documentMac=createHmac('sha256',scopeKey).update(binding+':docs:'+owner.workspaceId+':'+claims).digest('hex');
+      const setDocumentScope=value=>identityProbe.query(
+        "SELECT set_config('projectos.document_scope',$1,true),set_config('projectos.document_mac',$2,true)",[value,documentMac]);
+      await setDocumentScope(JSON.stringify({role:'owner',projects:null}));
+      assert.equal((await identityProbe.query('SELECT revision FROM document_versions')).rowCount,0);
+      await setDocumentScope(claims);
+      assert.equal((await identityProbe.query('SELECT revision FROM document_versions')).rowCount,1);
+      await identityProbe.query('SAVEPOINT viewer_write');
+      await assert.rejects(identityProbe.query(`INSERT INTO document_versions(workspace_id,document_id,revision,payload,saved_at)
+        SELECT workspace_id,document_id,revision+100,payload,saved_at FROM document_versions`),{code:'42501'});
+      await identityProbe.query('ROLLBACK TO SAVEPOINT viewer_write');
       assert.equal((await identityProbe.query("SELECT id FROM records WHERE kind='docs'")).rowCount,1);
       assert.equal((await identityProbe.query('SELECT id FROM records WHERE workspace_id=$1',[unrelated])).rowCount,0);
       await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[unrelated]);

@@ -12,6 +12,7 @@ const migrations = [
   ['008_workspace_record_rls', new URL('../schema/postgres/008_workspace_record_rls.sql', import.meta.url)],
   ['009_signed_workspace', new URL('../schema/postgres/009_signed_workspace.sql', import.meta.url)],
   ['010_delivery_boundaries', new URL('../schema/postgres/010_delivery_boundaries.sql', import.meta.url)],
+  ['011_document_project_rls', new URL('../schema/postgres/011_document_project_rls.sql', import.meta.url)],
 ];
 const client = await getPostgresPool().connect();
 try {

@@ -151,6 +151,20 @@ try {
     body:JSON.stringify({token:(await invitation.json()).token,email:viewer,password:account.password,displayName:'Fixture viewer'})});
   assert.equal(joined.status,200);
   const viewerHeaders={Cookie:joined.headers.get('set-cookie').split(';',1)[0]};
+  const version=(await (await fetch(appUrl+'/api/state',{headers})).json()).version;
+  const revisions=[project,otherProject].map(({id})=>({kind:'docs',id:'doc-'+id,action:'create',
+    record:{id:'doc-'+id,projectId:id,title:'Synthetic runbook',type:'Runbook',body:'Synthetic history evidence',
+      revision:1,updated:'2026-11-20'}}));
+  assert.equal((await fetch(appUrl+'/api/records',{headers,method:'PATCH',body:JSON.stringify({version,changes:revisions})})).status,200);
+  const history=(id,session)=>fetch(appUrl+'/api/docs/history?id=doc-'+id,{headers:session});
+  const [ownerHistory,visibleHistory,hiddenHistory]=await Promise.all([
+    history(project.id,headers),history(otherProject.id,viewerHeaders),history(project.id,viewerHeaders),
+  ]);
+  assert.equal(ownerHistory.status,200);
+  assert.equal((await ownerHistory.json()).versions.length,1);
+  assert.equal(visibleHistory.status,200);
+  assert.equal((await visibleHistory.json()).versions.length,1);
+  assert.equal(hiddenHistory.status,404);
   assert.equal((await fetch(endpoint,{headers:viewerHeaders})).status,404);
   const github=appUrl+'/api/integrations/github';
   assert.equal((await fetch(github,{headers:viewerHeaders})).status,403);

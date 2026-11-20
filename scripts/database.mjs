@@ -137,7 +137,7 @@ async function inTransaction(action, readOnly) {
     await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
     const db = postgresExecutor(client);
     let workspace;
-    db.scopeWorkspace = async workspaceId => {
+    db.scopeWorkspace = async (workspaceId, documentScope) => {
       if (!workspaceId || (workspace !== undefined && workspace !== workspaceId)) throw new Error('Invalid transaction workspace');
       workspace = workspaceId;
       const key = process.env.PROJECTOS_DB_SCOPE_KEY;
@@ -148,6 +148,12 @@ async function inTransaction(action, readOnly) {
       const signature = createHmac('sha256',Buffer.from(key,'hex')).update(binding + ':' + workspaceId).digest('hex');
       await client.query("SELECT set_config('projectos.workspace', $1, true), set_config('projectos.workspace_mac', $2, true)",
         [workspaceId,signature]);
+      if (documentScope) {
+        const claims=JSON.stringify(documentScope);
+        const mac=createHmac('sha256',Buffer.from(key,'hex')).update(binding+':docs:'+workspaceId+':'+claims).digest('hex');
+        await client.query("SELECT set_config('projectos.document_scope', $1, true), set_config('projectos.document_mac', $2, true)",
+          [claims,mac]);
+      }
     };
     const value = await action(db);
     await client.query('COMMIT');
