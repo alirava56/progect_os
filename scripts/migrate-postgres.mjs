@@ -9,6 +9,7 @@ const migrations = [
   ['005_invoice_records', new URL('../schema/postgres/005_invoice_records.sql', import.meta.url)],
   ['006_exchange_rate_records', new URL('../schema/postgres/006_exchange_rate_records.sql', import.meta.url)],
   ['007_record_identity', new URL('../schema/postgres/007_record_identity.sql', import.meta.url)],
+  ['008_workspace_record_rls', new URL('../schema/postgres/008_workspace_record_rls.sql', import.meta.url)],
 ];
 const client = await getPostgresPool().connect();
 try {

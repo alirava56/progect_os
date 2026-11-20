@@ -87,6 +87,7 @@ export async function acceptInvitation(input: {token: unknown; email: unknown; p
     await lockWorkspace(db, invite.workspace_id);
     const current = await db.one<Invite>(lookup, tokenHash, email, Date.now());
     if (!current) throw new InvitationError('INVALID_INVITATION');
+    await db.scopeWorkspace?.(current.workspace_id);
     const grants = await projectScope(db, current.workspace_id, current.project_ids === null ? null : JSON.parse(current.project_ids));
     const id = existing?.id ?? randomUUID();
     if (existing) {

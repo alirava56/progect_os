@@ -56,6 +56,7 @@ export async function projectPolicy(db: SqlExecutor, account: Account): Promise<
     account.workspaceId, account.id,
   );
   if (!member || member.role !== account.role) throw new ForbiddenError();
+  await db.scopeWorkspace?.(account.workspaceId);
   if (member.role === 'owner' || member.project_ids === null) return { projectIds: null };
   const grants: unknown = JSON.parse(member.project_ids);
   if (!Array.isArray(grants) || grants.some(id => typeof id !== 'string')) throw new ForbiddenError();

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkOrigin, getCurrentAccount, rateLimit, readLimitedJson } from '@/lib/server/auth';
-import { canSeeProject, projectPolicy, sql, storedRecord, type Account } from '@/lib/server/db';
+import { canSeeProject, projectPolicy, sql, loadRecord, type Account } from '@/lib/server/db';
 import { apiError, jsonError, noStore } from '@/lib/server/http';
 import { githubBindings, syncRepository, type RepositoryBinding, type RepositorySnapshot } from '@/lib/server/github';
 import { validRecordId } from '@/lib/record-contract';
@@ -25,10 +25,10 @@ export async function GET(request: NextRequest) {
   if (projectId===null && account.role !== 'owner') return apiError('Forbidden', 403);
   const policy=await projectPolicy(sql, account);
   if (projectId!==null && (!validRecordId(projectId) || !canSeeProject(policy,projectId)
-    || !await storedRecord(sql,account.workspaceId,'projects',projectId))) return apiError('Not found',404);
+    || !await loadRecord(account,'projects',projectId))) return apiError('Not found',404);
   const configured = bindings(account).filter(binding=>projectId===null || binding.projectId===projectId);
   const repositories = await Promise.all(configured.map(async binding => {
-    if (!await storedRecord(sql, account.workspaceId, 'projects', binding.projectId)) return;
+    if (!await loadRecord(account, 'projects', binding.projectId)) return;
     const latest = await snapshot(binding);
     if (!latest) return {repository:binding.repository,projectId:binding.projectId,state:'unknown',checkedAt:null};
     const age = Date.now() - Date.parse(latest.checkedAt);
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     return apiError('Invalid repository mapping', 422);
   }
   const binding = bindings(account).find(row => row.projectId === projectId && row.repository === repository);
-  if (!binding || !await storedRecord(sql, account.workspaceId, 'projects', projectId)) return apiError('Not found', 404);
+  if (!binding || !await loadRecord(account, 'projects', projectId)) return apiError('Not found', 404);
   const limited = await rateLimit('github:sync', JSON.stringify([account.workspaceId,projectId,repository]), 5, 60_000);
   if (!limited.allowed) return apiError('Try again later', 429, {'Retry-After':String(limited.retryAfter)});
   const previous = await snapshot(binding);

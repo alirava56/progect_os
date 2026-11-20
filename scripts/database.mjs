@@ -134,7 +134,14 @@ async function inTransaction(action, readOnly) {
   let discard = false;
   try {
     await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
-    const value = await action(postgresExecutor(client));
+    const db = postgresExecutor(client);
+    let workspace;
+    db.scopeWorkspace = async workspaceId => {
+      if (!workspaceId || (workspace !== undefined && workspace !== workspaceId)) throw new Error('Invalid transaction workspace');
+      workspace = workspaceId;
+      await client.query("SELECT set_config('projectos.workspace', $1, true)", [workspaceId]);
+    };
+    const value = await action(db);
     await client.query('COMMIT');
     return value;
   } catch (error) {

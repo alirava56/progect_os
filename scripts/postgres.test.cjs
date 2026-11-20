@@ -163,6 +163,24 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
         "UPDATE records SET project_id=NULL WHERE kind='docs'",
       ), {code:'23514', constraint:'records_payload_identity'});
       assert.equal((await identityProbe.query("SELECT project_id FROM records WHERE kind='docs'")).rows[0].project_id,'alpha');
+      const unrelated = 'unrelated-' + suffix;
+      const stamp = new Date().toISOString();
+      await identityProbe.query('INSERT INTO workspaces(id,name,created_at) VALUES($1,$2,$3)', [unrelated,'Synthetic second workspace',stamp]);
+      await identityProbe.query(`INSERT INTO records(workspace_id,kind,id,project_id,payload,updated_at)
+        VALUES($1,'projects','other','other',$2,$3)`,[unrelated,JSON.stringify(project('other')),stamp]);
+      await identityProbe.query('SET ROLE "' + runtimeRole + '"');
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query('BEGIN');
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[owner.workspaceId]);
+      assert.equal((await identityProbe.query("SELECT id FROM records WHERE kind='docs'")).rowCount,1);
+      assert.equal((await identityProbe.query('SELECT id FROM records WHERE workspace_id=$1',[unrelated])).rowCount,0);
+      await assert.rejects(identityProbe.query(
+        "UPDATE records SET workspace_id='outside-fixture' WHERE kind='docs'",
+      ),{code:'42501'});
+      await identityProbe.query('ROLLBACK');
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query('RESET ROLE');
+      await identityProbe.query('DELETE FROM workspaces WHERE id=$1',[unrelated]);
     } finally { await identityProbe.end(); }
 
     const report = JSON.parse(run('postgres-backup.mjs','backup',postgresBackup));
