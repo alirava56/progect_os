@@ -28,6 +28,16 @@ npm run start -- --hostname 127.0.0.1 --port 3000
 psql "service=projectos_staging_migrator" -X -v runtime_role=projectos_app -f schema/postgres/grant-runtime.sql
 ```
 
+پس از Migration 009 و پیش از فعال‌کردن حساب وب، کلید تصادفی ۳۲ بایتی مستقل را به‌شکل ۶۴ رقم هگز در Secret Manager قرار دهید. با اتصال مالک schema و همین مقدار در `PROJECTOS_DB_SCOPE_KEY`، فرمان `node scripts/provision-db-scope.mjs` را اجرا کنید. همان مقدار را به محیط وب بدهید. کلید در Backup قرار نمی‌گیرد. پس از Restore آن را دوباره Provision کنید. نصب Migration و چرخش کلید را در پنجرهٔ توقف نوشتن انجام دهید.
+
+برای ارسال اعلان، برای هر Workspace یک نقش ورود جدید بسازید و از حساب مهاجرت برای اجرای فرمان زیر استفاده کنید. اتصال آن نقش را فقط به فرایند `npm run notifications:deliver` بدهید.
+
+```shell
+psql "service=projectos_staging_migrator" -X -v delivery_role=projectos_delivery_alpha -v workspace_id=alpha -f schema/postgres/grant-delivery.sql
+```
+
+در Restore روی کلاستر تازه، نقش‌های ارجاع‌شده در Policyها را پیش از Restore با همان نام ایجاد کنید. GRANTها در آرشیو ثبت نمی‌شوند. پیش از اجرای مجدد Worker همان فرمان را با Workspace تأییدشده دوباره اجرا کنید.
+
 حساب وب اجازهٔ تغییر رکوردهای عملیاتی و افزودن رویداد ممیزی و نسخهٔ سند را دارد. نگهداری و پاک‌سازی دوره‌ای، Worker و Backup با حساب‌های جداگانه اجرا می‌شوند. اسکریپت برای نقش تازه طراحی شده است و مجوزهای مستقیم قبلی یا مجوزهای عمومی سفارشی محیط را بازنشانی نمی‌کند. نتیجهٔ تفکیک نقش روی Staging باید با حساب واقعی همان محیط بررسی شود.
 
 تست‌های CI، SCA و CodeQL، مجوزهای نقش واقعی PostgreSQL، Migration، بازیابی از صفر، رصد زمان‌بندی، عملکرد و دسترس‌پذیری را در محیط هدف اجرا کنید. قطع نگه‌داشتن نوشتن تا پایان Smoke، امکان بازگشت به ورودی SQLite را حفظ می‌کند. اطلاعات پایدار آمادهٔ بهره‌برداری نیازمند Backup مستقل و تمرین بازیابی است. [راهنمای Migration](../migrations/SQLITE-TO-POSTGRES-FA.md)

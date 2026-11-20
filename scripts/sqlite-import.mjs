@@ -162,6 +162,25 @@ async function targetManifest(client) {
   return { digest: digest.digest('hex'), counts };
 }
 
+export async function verifyRollbackBoundary(pool, expected) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await client.query('SET LOCAL row_security=off');
+    const known = [...tables.map(table => table.name), 'sqlite_imports', 'projectos_schema_migrations'];
+    const extra = await client.query(`SELECT 1 FROM pg_tables WHERE schemaname='public'
+      AND NOT (tablename = ANY($1::text[])) LIMIT 1`, [known]);
+    const recorded = await client.query('SELECT 1 FROM sqlite_imports WHERE source_digest=$1', [expected.digest]);
+    if (extra.rowCount || !recorded.rowCount || (await targetManifest(client)).digest !== expected.digest) {
+      throw new SourceError('Unsafe SQLite rollback: target differs from the imported snapshot');
+    }
+    return {status:'matches_imported_snapshot',digest:expected.digest};
+  } finally {
+    const discard = await client.query('ROLLBACK').then(() => false, () => true);
+    client.release(discard);
+  }
+}
+
 export async function importSnapshot(pool, snapshot, expected, beforeCommit = async () => {}) {
   const client = await pool.connect();
   try {

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- run the TypeScript services with Node's test runner */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomBytes } = require('node:crypto');
+const { createHmac, randomBytes } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -38,6 +38,8 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
   const target = 'projectos_test_' + suffix;
   const restoreTarget = 'projectos_restore_' + suffix;
   const runtimeRole = 'projectos_runtime_' + suffix;
+  const deliveryRole = 'projectos_delivery_' + suffix;
+  let deliveryCreated = false;
   let runtimeCreated = false;
   const connectionFor = db => new URL('/' + db, url).href;
   const admin = new Client({ connectionString: url.href });
@@ -135,6 +137,8 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.equal(imported.status, 'imported');
     assert.equal(imported.digest, plan.digest);
     assert.deepEqual(imported.counts, plan.counts);
+    const rollbackCheck=()=>run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--check-rollback','--backup',legacyBackup);
+    assert.equal(JSON.parse(rollbackCheck()).status,'matches_imported_snapshot');
     assert.equal(JSON.parse(run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--apply','--backup',legacyBackup)).status, 'already_imported');
     assert.equal(JSON.parse(run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--dry-run')).digest, plan.digest);
 
@@ -150,12 +154,15 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
       commitRecordChanges(owner, before.version, [edit('beta', 'independent B')]),
     ]);
     assert.notEqual(one, two);
+    assert.throws(rollbackCheck,/Unsafe SQLite rollback/);
     await assert.rejects(commitRecordChanges(owner, before.version, [edit('alpha', 'stale')]), /changed/);
     const record = await sql.one("SELECT payload FROM records WHERE kind='projects' AND id='alpha'");
     assert.equal(JSON.parse(record.payload).next, 'independent A');
     const identityProbe = new Client({connectionString:connectionFor(target)});
     try {
       await identityProbe.connect();
+      const scopeKey=randomBytes(32);
+      await identityProbe.query('INSERT INTO projectos_private.scope_key VALUES(true,$1)',[scopeKey]);
       await assert.rejects(identityProbe.query(
         "UPDATE records SET payload=(payload::jsonb || jsonb_build_object('projectId','beta'))::text WHERE kind='docs'",
       ), {code:'23514', constraint:'records_payload_identity'});
@@ -172,13 +179,26 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
       assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
       await identityProbe.query('BEGIN');
       await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[owner.workspaceId]);
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      const {rows:[{binding}]}=await identityProbe.query(
+        "SELECT pg_backend_pid()::text || ':' || extract(epoch FROM transaction_timestamp())::text AS binding");
+      const mac=createHmac('sha256',scopeKey).update(binding+':'+owner.workspaceId).digest('hex');
+      await identityProbe.query("SELECT set_config('projectos.workspace_mac',$1,true)",[mac]);
       assert.equal((await identityProbe.query("SELECT id FROM records WHERE kind='docs'")).rowCount,1);
       assert.equal((await identityProbe.query('SELECT id FROM records WHERE workspace_id=$1',[unrelated])).rowCount,0);
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[unrelated]);
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[owner.workspaceId]);
       await assert.rejects(identityProbe.query(
         "UPDATE records SET workspace_id='outside-fixture' WHERE kind='docs'",
       ),{code:'42501'});
       await identityProbe.query('ROLLBACK');
       assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query('BEGIN');
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true), set_config('projectos.workspace_mac',$2,true)",[owner.workspaceId,mac]);
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await assert.rejects(identityProbe.query('SELECT secret FROM projectos_private.scope_key'),{code:'42501'});
+      await identityProbe.query('ROLLBACK');
       await identityProbe.query('RESET ROLE');
       await identityProbe.query('DELETE FROM workspaces WHERE id=$1',[unrelated]);
     } finally { await identityProbe.end(); }
@@ -198,6 +218,9 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     const catalog=execFileSync(pgRestore,['--list',catalogFixture],{encoding:'utf8',timeout:15_000});
     assert.match(catalog,/TABLE public records\b/);
     assert.match(catalog,/TABLE public machine_observations\b/);
+    assert.match(catalog,/TABLE projectos_private scope_key\b/);
+    assert.match(catalog,/EXTENSION - pgcrypto\b/);
+    assert.doesNotMatch(catalog,/TABLE DATA projectos_private scope_key\b/);
     const truncatedBackup=join(area,'truncated.posbak');
     const archive=readFileSync(catalogFixture);
     await encryptArchive(Readable.from([archive.subarray(0,archive.length-512)]),
@@ -295,10 +318,39 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.deepEqual(restoredLedger.payments,[saved]);
     assert.equal(restoredLedger.invoices.find(row=>row.id===unpaid.id).state,'void');
     assert.deepEqual(restoredLedger.exchangeRates,[quote]);
+    const deliveryPassword = randomBytes(24).toString('hex');
+    await admin.query(`CREATE ROLE "${deliveryRole}" LOGIN PASSWORD '${deliveryPassword}'`);
+    deliveryCreated = true;
+    const otherWorkspace='delivery-other-'+suffix;
+    const stamp=new Date().toISOString();
+    await sql.run('INSERT INTO workspaces(id,name,created_at) VALUES(?,?,?)',otherWorkspace,'Synthetic other workspace',stamp);
+    for (const [id,workspace] of [['allowed-delivery',owner.workspaceId],['hidden-delivery',otherWorkspace]]) {
+      await sql.run(`INSERT INTO notification_outbox(id,workspace_id,reminder_id,scheduled_for,channel,state,created_at)
+        VALUES(?,?,?,'2031-03-01','telegram','pending',?)`,id,workspace,'fixture',stamp);
+    }
+    execFileSync(psql,['-X','-h',url.hostname,'-p',url.port||'5432','-U',decodeURIComponent(url.username),
+      '-d',ledgerRestore,'-f',join(__dirname,'../schema/postgres/grant-delivery.sql'),
+      '-v','delivery_role='+deliveryRole,'-v','workspace_id='+owner.workspaceId],psqlOptions);
+    await closeDatabase();
+    const deliveryUrl=new URL(connectionFor(ledgerRestore));
+    deliveryUrl.username=deliveryRole;
+    deliveryUrl.password=deliveryPassword;
+    process.env.PROJECTOS_DATABASE_URL=deliveryUrl.href;
+    const {deliverNotifications}=await import('./notification-delivery.mjs');
+    const sent=[];
+    const delivery=await deliverNotifications(owner.workspaceId,{telegram:async job=>{sent.push(job.id);return true;}});
+    assert.equal(delivery.accepted,1);
+    assert.deepEqual(sent,['allowed-delivery']);
+    assert.equal(await sql.one("SELECT id FROM notification_outbox WHERE id='hidden-delivery'"),undefined);
+    await assert.rejects(deliverNotifications(otherWorkspace,{telegram:async()=>true}),/Unknown notification workspace/);
+    await assert.rejects(sql.all('SELECT id FROM records'),{code:'42501'});
+    await assert.rejects(sql.run("UPDATE notification_outbox SET reminder_id='blocked'"),{code:'42501'});
+    await assert.rejects(sql.run("INSERT INTO worker_heartbeats(name,checked_at) VALUES('forbidden',?)",stamp),{code:'42501'});
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');
     if (runtimeCreated) await admin.query('DROP ROLE "' + runtimeRole + '"');
+    if (deliveryCreated) await admin.query('DROP ROLE "' + deliveryRole + '"');
     await admin.end();
     rmSync(area, { recursive:true, force:true, maxRetries:5 });
   }

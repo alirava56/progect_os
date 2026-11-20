@@ -57,6 +57,12 @@ try {
     env:{...env, PGPASSWORD:decodeURIComponent(adminUrl.password)},stdio:['ignore','ignore','pipe'],timeout:30_000,
   });
   const appDatabase = new URL(runtime);
+  const signingKey=randomBytes(32);
+  const installer=new pg.Client({connectionString:runtime.href});
+  await installer.connect();
+  try { await installer.query('INSERT INTO projectos_private.scope_key VALUES(true,$1)',[signingKey]); }
+  finally { await installer.end(); }
+  env.PROJECTOS_DB_SCOPE_KEY=signingKey.toString('hex');
   appDatabase.username = runtimeRole;
   appDatabase.password = runtimePassword;
   env.PROJECTOS_DATABASE_URL = appDatabase.href;
