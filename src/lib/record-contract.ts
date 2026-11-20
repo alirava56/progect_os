@@ -2,7 +2,7 @@ import type { DemoData } from './types';
 
 export const recordKinds = [
   'projects', 'tasks', 'resources', 'secrets', 'reminders', 'incidents',
-  'expenses', 'charges', 'contracts', 'revenues', 'docs',
+  'expenses', 'charges', 'contracts', 'revenues', 'docs', 'invoices', 'payments',
 ] as const;
 export type RecordKind = typeof recordKinds[number];
 export type WorkspaceRecord = DemoData[RecordKind][number];

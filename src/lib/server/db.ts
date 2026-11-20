@@ -3,8 +3,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { getDb, lockWorkspace, readTransaction, sql, transaction, type SqlExecutor } from '../../../scripts/database.mjs';
 import { reminderAlertId, retireReminderAlert } from '../../../scripts/reminder-scheduler.mjs';
 import { emptyData } from '../empty-data';
+import { normalized } from '../format';
 import { isRecordKind, recordKinds, type RecordKind, type WorkspaceRecord } from '../record-contract';
-import type { ActivityEvent, DemoData, Preferences, Resource } from '../types';
+import type { ActivityEvent, DemoData, Invoice, Payment, Preferences, Resource } from '../types';
 import { redactStoredValue, redactCredentials } from './credential-guard';
 import { ValidationError, type CanonicalState } from './validation';
 
@@ -134,6 +135,7 @@ const eventSources: Record<string, string> = {
   projects: 'پروژه‌ها', tasks: 'وظایف', resources: 'زیرساخت', docs: 'مستندات',
   reminders: 'تقویم', incidents: 'هشدارها', secrets: 'خزانه', expenses: 'مالی',
   charges: 'اشتراک‌ها', contracts: 'قراردادها', revenues: 'درآمد',
+  invoices: 'فاکتورها', payments: 'پرداخت‌ها',
 };
 type EventRow = Pick<ActivityEvent, 'id' | 'title' | 'projectId' | 'date'> & {
   kind: string; action: string; actorSnapshot: string; fallbackActor: string | null;
@@ -243,6 +245,40 @@ async function retireChangedDeadlines(db: SqlExecutor, workspace: string, change
   }
 }
 
+async function validateInvoiceLedger(db: SqlExecutor, workspace: string) {
+  const rows=await db.all<Pick<RecordRow,'kind'|'id'|'payload'>>(
+    "SELECT kind,id,payload FROM records WHERE workspace_id=? AND kind IN ('projects','invoices','payments')",workspace);
+  const projects=new Set(rows.filter(row=>row.kind==='projects').map(row=>row.id));
+  const invoices=new Map<string,Invoice>();
+  const invoiceReferences=new Set<string>();
+  for (const row of rows) {
+    if (row.kind!=='invoices') continue;
+    const invoice=JSON.parse(row.payload) as Invoice;
+    const key=normalized(invoice.reference.normalize('NFKC'));
+    if (!projects.has(invoice.projectId)) throw new ValidationError('Invoice project must exist');
+    if (invoiceReferences.has(key)) throw new ValidationError('Duplicate invoice reference');
+    invoiceReferences.add(key);
+    invoices.set(invoice.id,invoice);
+  }
+  const paymentReferences=new Set<string>();
+  const balances=new Map<string,bigint>();
+  for (const row of rows) {
+    if (row.kind!=='payments') continue;
+    const payment=JSON.parse(row.payload) as Payment;
+    const key=normalized(payment.reference.normalize('NFKC'));
+    if (paymentReferences.has(key)) throw new ValidationError('Duplicate payment reference');
+    paymentReferences.add(key);
+    const invoice=invoices.get(payment.invoiceId);
+    if (!invoice || invoice.projectId!==payment.projectId || invoice.currency!==payment.currency
+      || invoice.state==='void' || payment.paidOn<invoice.issuedOn) {
+      throw new ValidationError('Payment is incompatible with its invoice');
+    }
+    const paid=(balances.get(payment.invoiceId) ?? BigInt(0))+BigInt(payment.amount);
+    if (paid>BigInt(invoice.amount)) throw new ValidationError('Payments exceed invoice amount');
+    balances.set(payment.invoiceId,paid);
+  }
+}
+
 export async function persistChanges(
   db: SqlExecutor, account: Account, version: number, changes: PreparedChange[], preferences?: Preferences,
 ) {
@@ -254,6 +290,15 @@ export async function persistChanges(
     const { kind, id, record, previous } = change;
     const before = previous ? JSON.parse(previous.payload) as WorkspaceRecord : undefined;
     const projectId = record ? projectOf(kind, record) : previous?.project_id ?? null;
+    if (kind==='payments' && previous) throw new ValidationError('Posted payments are immutable');
+    if (kind==='invoices') {
+      const invoice=record as Invoice | undefined;
+      const original=before as Invoice | undefined;
+      if (!original && invoice?.state!=='open') throw new ValidationError('New invoices must be open');
+      if (original && (original.state!=='open' || !isDeepStrictEqual(invoice,{...original,state:'void'}))) {
+        throw new ValidationError('An issued invoice can only be voided');
+      }
+    }
     if (kind === 'incidents' && (id.startsWith('auto-') || id.startsWith('monitor-'))) {
       if (!before || !record || !isDeepStrictEqual(automationFields(before), automationFields(record))) {
         throw new ForbiddenError();
@@ -320,6 +365,9 @@ export async function persistChanges(
     record ? previous ? 'update' : 'create' : 'delete', redactCredentials(title), projectId ?? '', now,
     redactCredentials(account.displayName));
   }
+  if (changes.some(({kind, record})=>kind==='invoices' || kind==='payments' || (kind==='projects' && !record))) {
+    await validateInvoiceLedger(db,workspaceId);
+  }
   await retireChangedDeadlines(db, workspaceId, changes);
   if (preferences) {
     await writeRow(db, workspaceId, { kind: 'preferences', id: 'singleton', project_id: null,
@@ -344,8 +392,10 @@ export async function saveState(account: Account, expectedVersion: number, next:
     );
     const changes: PreparedChange[] = [];
     for (const kind of recordKinds) {
+      const requested=next[kind];
+      if (requested===undefined) continue;
       const previous = new Map(rows.filter(row => row.kind === kind).map(row => [row.id, row]));
-      for (const record of next[kind]) {
+      for (const record of requested) {
         const row = previous.get(record.id);
         previous.delete(record.id);
         if (!row || !isDeepStrictEqual(redactRecord(row), record)) {

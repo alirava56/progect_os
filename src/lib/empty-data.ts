@@ -1,7 +1,8 @@
 import type { DemoData } from './types';
 
 export const emptyData: DemoData = {
-  projects:[],tasks:[],resources:[],secrets:[],reminders:[],incidents:[],expenses:[],charges:[],contracts:[],revenues:[],docs:[],events:[],
+  projects:[],tasks:[],resources:[],secrets:[],reminders:[],incidents:[],expenses:[],charges:[],contracts:[],revenues:[],
+  invoices:[],payments:[],docs:[],events:[],
   users:[],
   integrations:[
     {id:'github',name:'GitHub',description:'مخزن و Issue — اتصال برقرار نیست',art:'infrastructure/git-branch',protocol:'API',connected:false},

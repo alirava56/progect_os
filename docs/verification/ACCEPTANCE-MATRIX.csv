@@ -15,8 +15,9 @@ C05,Project-scoped resource references for Vault,P1,inventory link and owner-onl
 C06,Renewal deadline change and worker crash,P0,transactional cancellation and per-record lead days,real child crash and provider mock plus PostgreSQL,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 D01,HTTPS machine observations GitHub and memory,P1,metadata routes scoped inputs,mock and HTTP boundaries,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,Provider behavior not certified
 D02,Provider validation for integrations,P1,project bindings and opt-ins,staging integrations,INTEGRATIONS-FA.md,BLOCKED_EXTERNAL,GitHub AI and monitoring staging accounts
-D03,Exact mixed currency accounting,P1,explicit minor units and grouped BigInt totals,core money tests,core.test.cjs,PARTIAL,Invoice payment ledger allocations and sourced FX
+D03,Exact mixed currency accounting,P1,explicit minor units and grouped BigInt totals,core money tests,core.test.cjs,PARTIAL,Sourced FX and contract settlement reconciliation
 D04,Host disk observations and scoped server metrics,P1,Migration 004 and authorized agent HTTP API,filesystem sampling plus PostgreSQL and UI tests,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 D05,Project GitHub activity and bounded backfill,P1,authorized project snapshots plus owner-only backfill,provider mock and PostgreSQL HTTP plus UI,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,Staging integration unverified
+D06,Invoice installments and posted payments,P1,Migration 005 and transaction-scoped ledger,core and PostgreSQL duplicate race plus browser forms and CSV,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 E01,Release security and performance confirmation,P0,HTTP controls axe and smoke,local release tests,evidence-2026-11-19,PARTIAL,Independent security review and full production-like workload
 E02,Operational release and rollback,P0,recovery and migration runbooks,test:postgres rollback and restore,FINAL-DELIVERY-REPORT-FA.md,BLOCKED_EXTERNAL,Approved staging rehearsal and release authorization

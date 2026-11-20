@@ -67,7 +67,7 @@ export const defaultData: DemoData = {
     {id:'a4',title:'تست تأیید رابط کاربری باز مانده',projectId:'gym',priority:'medium',source:'مدیریت کار',date:'2025-11-12',state:'open'},
     {id:'a5',title:'بازبینی گواهی دامنه انجام شد',projectId:'gym',priority:'low',source:'اطلاعات زیرساخت',date:'2025-11-10',state:'acknowledged'},
   ],
-  charges: [],contracts: [],revenues: [],
+  charges: [],contracts: [],revenues: [],invoices: [],payments: [],
   expenses: [
     {id:'e1',title:'VPS اصلی',projectId:'novaguard',category:'زیرساخت',amount:950000,date:'2025-11-21',status:'upcoming'},
     {id:'e2',title:'دامنه سرویس',projectId:'gym',category:'دامنه',amount:350000,date:'2025-12-06',status:'upcoming'},

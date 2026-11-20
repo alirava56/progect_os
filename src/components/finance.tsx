@@ -7,6 +7,7 @@ import { csv, dateLabel, download, matches, newId, percent, resourceHref, today 
 import { useDemo } from '@/lib/store';
 import type { Expense, RecurringCharge, ContractRecord, RevenueEntry, CurrencyUnit } from '@/lib/types';
 import { Bars, Donut, Trend } from './charts';
+import { InvoiceLedger } from './invoice-ledger';
 import { ProjectField, ProjectFilter, SelectOptions, projectName } from './forms';
 import { Button, Callout, Empty, Field, Filter, FormActions, Heading, Metrics, Modal, Panel, Pill, Progress, Row, SearchField, SectionBar, Table, TextLink, formValues } from './ui';
 
@@ -119,6 +120,7 @@ export function Finance() {
           {label:'تاریخ',render:c=>dateLabel(c.date)},{label:'وضعیت',render:c=>c.status==='received'?'دریافت‌شده':'در انتظار'}
         ]}/>:<Empty title="درآمدی ثبت نشده است" />}
       </Panel>
+      <InvoiceLedger projectId={projectScope}/>
       <Panel title="فهرست پرداخت‌ها و تمدیدها"><Table label="پرداخت‌های" rows={items} columns={[
         {label:'شرح',render:e => <button className="cell-link" type="button" onClick={() => setEdit(e)}>{e.title}</button>},
         {label:'پروژه',render:e => <bdi>{projectName(data,e.projectId)}</bdi>},

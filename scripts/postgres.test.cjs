@@ -173,6 +173,42 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     await scan('2031-03-03T10:00:00Z');
     const next='email-'+reminderAlertId(owner.workspaceId,'تمدید',vps.id,moved.expires,'resources');
     assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?',next)).state,'pending');
+
+    const invoice={id:'invoice',projectId:'alpha',reference:'FIX-01',title:'Fixture invoice',direction:'receivable',
+      currency:'USD',amountUnit:'minor',amount:1250,issuedOn:'2031-03-01',dueOn:'2031-04-01',state:'open',
+      installments:[{dueOn:'2031-03-15',amount:500},{dueOn:'2031-04-01',amount:750}]};
+    const revision=await commitRecordChanges(owner,(await loadState(owner)).version,[create('invoices',invoice)]);
+    const payment={id:'payment-one',projectId:'alpha',invoiceId:invoice.id,reference:'FIX-P۱',
+      currency:'USD',amountUnit:'minor',amount:500,paidOn:'2031-03-10'};
+    const results=await Promise.allSettled([
+      commitRecordChanges(owner,revision,[create('payments',payment)]),
+      commitRecordChanges(owner,revision,[create('payments',{...payment,id:'payment-duplicate',reference:'fix-p1'})]),
+    ]);
+    assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+    assert.match(results.find(result=>result.status==='rejected').reason.message,/Duplicate payment reference/);
+    const afterPayment=await loadState(owner);
+    assert.equal(afterPayment.data.payments.length,1);
+    assert.equal(afterPayment.data.payments[0].amount,500);
+    await assert.rejects(commitRecordChanges(owner,afterPayment.version,[create('payments',{
+      ...payment,id:'wrong-currency',reference:'new-ref',currency:'IRR',
+    })]),/incompatible/);
+    await assert.rejects(commitRecordChanges(owner,afterPayment.version,[create('payments',{
+      ...payment,id:'overpayment',reference:'over-ref',amount:751,
+    })]),/exceed/);
+    const saved=afterPayment.data.payments[0];
+    await assert.rejects(commitRecordChanges(owner,afterPayment.version,[{kind:'payments',id:saved.id,action:'delete'}]),/immutable/);
+    await assert.rejects(commitRecordChanges(owner,afterPayment.version,[{kind:'invoices',id:invoice.id,action:'replace',
+      record:{...invoice,direction:'payable'}}]),/only be voided/);
+    await assert.rejects(commitRecordChanges(owner,afterPayment.version,[{kind:'invoices',id:invoice.id,action:'replace',
+      record:{...invoice,state:'void'}}]),/incompatible/);
+    assert.equal((await loadState(owner)).version,afterPayment.version);
+    const unpaid={...invoice,id:'unpaid-invoice',reference:'UNPAID-01'};
+    const unpaidVersion=await commitRecordChanges(owner,afterPayment.version,[create('invoices',unpaid)]);
+    const voidedVersion=await commitRecordChanges(owner,unpaidVersion,[{kind:'invoices',id:unpaid.id,action:'replace',
+      record:{...unpaid,state:'void'}}]);
+    await assert.rejects(commitRecordChanges(owner,voidedVersion,[{kind:'invoices',id:unpaid.id,action:'replace',
+      record:unpaid}]),/only be voided/);
+    assert.equal((await loadState(owner)).data.invoices.find(row=>row.id===unpaid.id).state,'void');
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');

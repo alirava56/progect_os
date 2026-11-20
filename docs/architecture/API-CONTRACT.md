@@ -29,6 +29,8 @@ Vault references may carry an optional `resourceId`. At write time the resource 
 
 Resources, tasks and reminders accept optional `noticeDays` values from 0 through 60. A resource needs a renewal date when this value is set. Setting a task's lead time opts that task into the deadline scheduler. Older payloads retain their existing schedule semantics without a backfill. The alert states also include `dismissed` and `resolved`.
 
+The record APIs expose `invoices` and `payments` to project-authorized readers. Writes require Owner. Invoices begin open and store their direction, dates, and optional installment amounts. Payments require the same project and currency as the invoice, a date on or after issue, and a distinct payment reference. A batch that exceeds the invoice amount is rejected. The only supported change after invoice issue is voiding an unpaid invoice. Posted payments are immutable. Each amount is a positive integer marked with `amountUnit: "minor"`. USD uses cents, IRR uses rials, and TOMAN uses whole tomans. Reports keep currencies separate and allocate payments to the earliest installment first. Older local snapshots that omit the two collections preserve the records already stored.
+
 Example request with the latest usable Workspace watermark.
 
 ```json

@@ -4,7 +4,7 @@ import { emptyData } from '../empty-data';
 import { suspiciousInRecord } from './credential-guard';
 import {vaultLink} from '../vault-link';
 
-type Rule = {type:'string'|'number'|'boolean'|'strings'|'checklist'|'comments'; max?:number; values?:readonly string[]; optional?:boolean};
+type Rule = {type:'string'|'number'|'boolean'|'strings'|'checklist'|'comments'|'installments'; max?:number; values?:readonly string[]; optional?:boolean};
 const s=(max=200,optional=false,values?:readonly string[]):Rule=>({type:'string',max,optional,values});
 const n=(max=1e12,optional=false):Rule=>({type:'number',max,optional});
 const str=(max=30):Rule=>({type:'strings',max});
@@ -22,9 +22,15 @@ const ruleSets={
   contracts:{id:s(100),projectId:s(100),title:s(160),client:s(160),start:s(32),end:s(32),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),state:s(15,false,['draft','active','completed'])},
   revenues:{id:s(100),projectId:s(100),title:s(160),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),date:s(32),status:s(20,false,['received','outstanding'])},
   docs:{id:s(100),title:s(180),projectId:s(100),type:s(30,false,['Runbook','Technical Design','Decision Record','Checklist','Release Notes']),body:s(100000),revision:n(1e6),updated:s(32)},
+  invoices:{id:s(100),projectId:s(100),reference:s(100),title:s(160),direction:s(16,false,['receivable','payable']),
+    amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,false,['minor']),issuedOn:s(10),dueOn:s(10),
+    state:s(12,false,['open','void']),installments:{type:'installments',max:24,optional:true}},
+  payments:{id:s(100),projectId:s(100),invoiceId:s(100),reference:s(100),amount:n(1e12),
+    currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,false,['minor']),paidOn:s(10)},
 } as const;
 type Collection=keyof typeof ruleSets;
-export type CanonicalState=Pick<DemoData,Collection|'preferences'>;
+type LedgerCollection='invoices'|'payments';
+export type CanonicalState=Pick<DemoData,Exclude<Collection,LedgerCollection>|'preferences'> & Partial<Pick<DemoData,LedgerCollection>>;
 export class ValidationError extends Error {constructor(public reason:string){super(reason);}}
 function bad(message:string):never { throw new ValidationError(message); }
 function plain(value:unknown):value is Record<string,unknown>{return value!==null&&typeof value==='object'&&!Array.isArray(value)&&Object.getPrototypeOf(value)===Object.prototype;}
@@ -59,6 +65,13 @@ function parseField(value:unknown,rule:Rule) {
     const date=text(v.date,32);
     checkDate(date);
     return {text:text(v.text,2000),date};
+  });
+  if(rule.type==='installments')return value.map(v=>{
+    if(!plain(v)||Object.keys(v).some(k=>!['dueOn','amount'].includes(k)))bad('Invalid invoice installment');
+    const dueOn=text(v.dueOn,10);
+    checkDate(dueOn);
+    if(typeof v.amount!=='number'||!Number.isSafeInteger(v.amount)||v.amount<=0||v.amount>1e12)bad('Invalid installment amount');
+    return {dueOn,amount:v.amount};
   });
   return bad('Unrecognized field');
 }
@@ -97,6 +110,28 @@ export function parseRecord<Kind extends Collection>(kind: Kind, item: unknown):
       checkDate(clean.updated);
       if (!Number.isSafeInteger(clean.revision) || Number(clean.revision) < 1) bad('Invalid document revision');
       break;
+    case 'payments':
+      if (!validRecordId(clean.invoiceId)) bad('Invalid invoice reference');
+      checkDate(clean.paidOn);
+      break;
+    case 'invoices': {
+      checkDate(clean.issuedOn);
+      checkDate(clean.dueOn);
+      const issued=clean.issuedOn as string, due=clean.dueOn as string;
+      if (due<issued) bad('Invoice due date precedes issue date');
+      const installments=clean.installments as DemoData['invoices'][number]['installments'];
+      if (installments?.length) {
+        let prior='';
+        let total=BigInt(0);
+        for (const item of installments) {
+          if (item.dueOn<issued || item.dueOn>due || item.dueOn<=prior) bad('Installments require distinct ordered dates within the invoice period');
+          prior=item.dueOn;
+          total+=BigInt(item.amount);
+        }
+        if (!Number.isSafeInteger(clean.amount) || total!==BigInt(clean.amount as number)) bad('Installments must sum to the invoice amount');
+      }
+      break;
+    }
     case 'expenses':
     case 'revenues': checkDate(clean.date); break;
     case 'charges': checkDate(clean.nextDue); break;
@@ -119,6 +154,11 @@ export function parseRecord<Kind extends Collection>(kind: Kind, item: unknown):
       break;
   }
   if (Object.hasOwn(clean, 'amount') && !Number.isSafeInteger(clean.amount)) bad('Monetary amounts must be integer minor units');
+  if (kind==='invoices' || kind==='payments') {
+    const reference=(clean.reference as string).trim();
+    if (!reference || Number(clean.amount)<=0) bad('Ledger records require a reference and positive amount');
+    clean.reference=reference;
+  }
   return clean as unknown as DemoData[Kind][number];
 }
 
@@ -209,12 +249,14 @@ export function parseState(value:unknown):CanonicalState {
     contracts:parseCollection(value.contracts,'contracts',5000),
     revenues:parseCollection(value.revenues,'revenues',10000),
     docs:parseCollection(value.docs,'docs',5000),
+    ...(value.invoices===undefined ? {} : {invoices:parseCollection(value.invoices,'invoices',10000)}),
+    ...(value.payments===undefined ? {} : {payments:parseCollection(value.payments,'payments',20000)}),
     preferences:parsePreferences(value.preferences),
   } as unknown as CanonicalState;
   const projects = new Set(state.projects.map(project => project.id));
   const resources = new Set(state.resources.map(resource => resource.id));
-  for (const kind of ['tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs'] as const)
-    for (const record of state[kind]) if (!projects.has(record.projectId)) bad('Unknown project in ' + kind);
+  for (const kind of ['tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs','invoices','payments'] as const)
+    for (const record of state[kind] ?? []) if (!projects.has(record.projectId)) bad('Unknown project in ' + kind);
   for (const resource of state.resources)
     if (resource.linkedProjectIds?.some(id => !projects.has(id))) bad('Invalid shared resource project');
   for (const charge of state.charges)

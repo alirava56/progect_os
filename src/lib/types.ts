@@ -104,6 +104,16 @@ export interface RevenueEntry {
   id:string;projectId:string;title:string;amount:number;currency:CurrencyUnit;amountUnit?:'minor';
   date:string;status:'received'|'outstanding';
 }
+export interface InvoiceInstallment { dueOn:string; amount:number }
+export interface Invoice {
+  id:string; projectId:string; reference:string; title:string; direction:'receivable'|'payable';
+  amount:number; currency:CurrencyUnit; amountUnit:'minor'; issuedOn:string; dueOn:string;
+  state:'open'|'void'; installments?:InvoiceInstallment[];
+}
+export interface Payment {
+  id:string; projectId:string; invoiceId:string; reference:string;
+  amount:number; currency:CurrencyUnit; amountUnit:'minor'; paidOn:string;
+}
 export interface Doc { id: string; title: string; projectId: string; type: DocType; body: string; revision: number; updated: string }
 export interface ActivityEvent { id: string; title: string; detail: string; projectId: string; actor: string; source: string; date: string }
 export interface Integration { id: string; name: string; description: string; art: string; protocol: string; connected: false }
@@ -130,6 +140,8 @@ export interface DemoData {
   charges: RecurringCharge[];
   contracts: ContractRecord[];
   revenues: RevenueEntry[];
+  invoices: Invoice[];
+  payments: Payment[];
   docs: Doc[];
   events: ActivityEvent[];
   integrations: Integration[];

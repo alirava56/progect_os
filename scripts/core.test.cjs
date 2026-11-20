@@ -808,6 +808,36 @@ test('multi-currency totals have exact minor units and CSV neutralizes spreadshe
   assert.ok(sheet.includes('"\'＝1+1"'));
 });
 
+test('invoice installments use exact remaining balances and legacy snapshots preserve the ledger', async () => {
+  const {commitRecordChanges}=require('../src/lib/server/record-service.ts');
+  const {parseRecord}=require('../src/lib/server/validation.ts');
+  const {invoiceBalance,installmentBalances}=require('../src/lib/invoice-ledger.ts');
+  const invoice={id:'compat-invoice',projectId:'compat-ledger',reference:'fixture-invoice',title:'Fixture invoice',
+    direction:'receivable',amountUnit:'minor',amount:1250,currency:'USD',
+    issuedOn:'2031-03-01',dueOn:'2031-04-01',state:'open',
+    installments:[{dueOn:'2031-03-15',amount:499},{dueOn:'2031-04-01',amount:751}]};
+  assert.throws(()=>parseRecord('invoices',{...invoice,installments:[{dueOn:'2031-03-15',amount:1249}]}),/sum/);
+  assert.throws(()=>parseRecord('invoices',{...invoice,currency:'JPY'}),ValidationError);
+  const payment={id:'compat-payment',projectId:invoice.projectId,invoiceId:invoice.id,reference:'fixture-payment',
+    amountUnit:'minor',currency:'USD',amount:500,paidOn:'2031-03-11'};
+  const created=(kind,record)=>({kind,id:record.id,action:'create',record});
+  await commitRecordChanges(owner,(await loadState(owner)).version,[
+    created('projects',project(invoice.projectId)),created('invoices',invoice),created('payments',payment),
+  ]);
+  const initial=await loadState(owner);
+  assert.deepEqual(invoiceBalance(invoice,initial.data.payments),{paid:BigInt(500),remaining:BigInt(750)});
+  assert.deepEqual(installmentBalances(invoice,BigInt(500)).map(item=>item.remaining),[BigInt(0),BigInt(750)]);
+  const legacy=structuredClone(initial.data);
+  delete legacy.invoices;
+  delete legacy.payments;
+  await saveState(owner,initial.version,parseState(legacy));
+  const after=await loadState(owner);
+  assert.deepEqual(after.data.invoices,[invoice]);
+  assert.deepEqual(after.data.payments,[payment]);
+  legacy.projects=legacy.projects.filter(item=>item.id!==invoice.projectId);
+  await assert.rejects(saveState(owner,after.version,parseState(legacy)),/Invoice project must exist/);
+});
+
 test('model citations accept literal permitted text and reject unsupported or wrong-source output',()=>{
   const {verifyQuotes}=require('../src/lib/server/project-memory.ts');
   const sources=[{id:'doc:test',excerpt:'Synthetic support sentence.'}];

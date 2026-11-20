@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import AxeBuilder from '@axe-core/playwright';
 import { totp } from '../src/lib/server/mfa';
 import { test, setupToken, testRequest, type Origin } from './isolated-app';
@@ -172,6 +173,90 @@ test('project form waits for the server commit before navigation and persists af
   await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
+});
+
+test('finance records installments and payments, preserves voided invoices, and scopes exported data', async ({page,origin,appURL}) => {
+  await bootstrap(page.request,origin);
+  const seeded=await page.request.patch('/api/records',{headers:origin,data:{version:0,changes:[
+    create('projects',project('finance-project')),create('projects',project('other-project')),
+  ]}});
+  expect(seeded.status()).toBe(200);
+  await page.goto('/finance');
+  async function issue(title:string,reference:string,withInstallments:boolean) {
+    await page.getByRole('button',{name:'فاکتور جدید',exact:true}).click();
+    const form=page.getByRole('dialog',{name:'فاکتور جدید'});
+    await form.getByLabel('عنوان فاکتور').fill(title);
+    await form.getByLabel('شمارهٔ فاکتور').fill(reference);
+    await form.getByLabel('پروژه',{exact:true}).selectOption('finance-project');
+    await form.getByLabel('ارز فاکتور').selectOption('USD');
+    await form.getByLabel('مبلغ فاکتور').fill('۱۰۰٫۰۰');
+    await form.getByLabel('تاریخ صدور (میلادی)').fill('2031-03-01');
+    await form.getByLabel('موعد فاکتور (میلادی)').fill('2031-04-01');
+    if (withInstallments) {
+      const installments=[['2031-03-15','۵۰٫۲۵'],['2031-04-01','۴۹٫۷۵']];
+      for (const [index,[date,amount]] of installments.entries()) {
+        await form.getByRole('button',{name:'افزودن قسط'}).click();
+        await form.getByLabel('موعد قسط '+(index+1)+' (میلادی)').fill(date);
+        await form.getByLabel('مبلغ قسط '+(index+1)).fill(amount);
+      }
+    }
+    await form.getByRole('button',{name:'ثبت فاکتور',exact:true}).click();
+    const entry=page.getByRole('button',{name:title,exact:true});
+    await expect(entry).toBeVisible();
+    await entry.click();
+    return page.getByRole('dialog',{name:title,exact:true});
+  }
+  const detail=await issue('فاکتور آزمایشی اقساط','FIX-100',true);
+  async function pay(reference:string,amount:string) {
+    await detail.getByRole('button',{name:'ثبت پرداخت',exact:true}).click();
+    const form=page.getByRole('dialog',{name:'ثبت پرداخت فاکتور'});
+    await form.getByLabel('شناسهٔ پرداخت').fill(reference);
+    await form.getByLabel('مبلغ پرداخت').fill(amount);
+    await form.getByLabel('تاریخ پرداخت (میلادی)').fill('2031-03-20');
+    await form.getByRole('button',{name:'ثبت پرداخت',exact:true}).click();
+    return form;
+  }
+  await pay('FIX-P۱','۶۰٫۰۰');
+  await expect(detail.getByRole('listitem').nth(0)).toContainText('۰٫۰۰ دلار');
+  await expect(detail.getByRole('listitem').nth(1)).toContainText('۴۰٫۰۰ دلار');
+  await expect(detail.getByRole('button',{name:'ابطال فاکتور'})).toHaveCount(0);
+  const duplicate=await pay('fix-p1','۱٫۰۰');
+  await expect(duplicate.getByRole('alert')).toContainText('شناسهٔ تکراری');
+  const {data,version}=await (await page.request.get('/api/state')).json();
+  expect(data.payments).toEqual([expect.objectContaining({reference:'FIX-P۱',amount:6000})]);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  const unpaid=await issue('فاکتور قابل ابطال','FIX-VOID',false);
+  await unpaid.getByRole('button',{name:'ابطال فاکتور'}).click();
+  await page.getByRole('dialog',{name:'ابطال فاکتور'}).getByRole('button',{name:'تأیید ابطال'}).click();
+  await expect(unpaid).toContainText('باطل');
+  await expect(unpaid.getByRole('button',{name:'ثبت پرداخت'})).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  const pending=page.waitForEvent('download');
+  await page.getByRole('button',{name:'خروجی فاکتورها'}).click();
+  const exported=await pending;
+  expect(exported.suggestedFilename()).toBe('projectos-invoices.csv');
+  expect(await readFile(await exported.path(),'utf8')).toContain('"USD","100.00","4000"');
+
+  const memberEmail='finance-restricted@example.test';
+  const invitation=await page.request.post('/api/team/invitations',{headers:origin,data:{
+    email:memberEmail,role:'editor',projectIds:['other-project'],
+  }});
+  expect(invitation.status()).toBe(200);
+  const member=await testRequest(appURL);
+  try {
+    const accepted=await member.post('/api/auth/accept-invite',{headers:origin,data:{
+      token:(await invitation.json()).token,email:memberEmail,password,displayName:'Restricted editor',
+    }});
+    expect(accepted.status()).toBe(200);
+    const {data:visible}=await (await member.get('/api/state')).json();
+    expect(visible.invoices).toEqual([]);
+    expect(visible.payments).toEqual([]);
+    expect((await member.get('/api/records/invoices/'+data.invoices[0].id)).status()).toBe(404);
+    expect((await member.patch('/api/records',{headers:origin,data:{version,changes:[
+      create('invoices',{...data.invoices[0],id:'editor-invoice',reference:'EDITOR',projectId:'other-project'}),
+    ]}})).status()).toBe(403);
+  } finally { await member.dispose(); }
 });
 
 test('only an empty archived project can be deleted from its page', async ({page, origin}) => {

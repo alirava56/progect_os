@@ -15,6 +15,7 @@
 | تحویل تلگرام و ایمیل و Timer در Staging | `BLOCKED_EXTERNAL` | پذیرش محلی Mock ثبت شد. تأیید حساب ارائه‌دهنده و اجرای زمان‌بندی‌شده در محیط آزمایشی باز است. |
 | گزارش دیسک و جزئیات سرور در فاز ۴ | `IMPLEMENTED_AND_VERIFIED` | عامل میزبان با نمونهٔ فایل‌سیستم محلی و HTTPS شبیه‌سازی‌شده آزموده شد. `test:postgres-http` پذیرش عامل، رد مجوز و دادهٔ ناقص و خواندن مجوزمحور را تأیید کرد. Migration 004 و Restore دادهٔ قدیمی و جدید را حفظ کردند. Chrome نمایش درصد تازه و پنهان‌کردن درصد قدیمی را تأیید کرد. |
 | مرور فعالیت و دریافت سابقهٔ GitHub | `IMPLEMENTED_AND_VERIFIED` | مرور Commit، Branch، Pull Request و Issue در صفحهٔ پروژه و نمایش وضعیت قدیمی آزموده شدند. Mock سقف سه صفحه، حذف اقلام تکراری و پالایش پاسخ را بررسی کرد. آزمون HTTP با PostgreSQL خواندن مجاز Viewer و رد همگام‌سازی آن را تأیید کرد. اعتبارسنجی اتصال با حساب بیرونی Staging باز است. |
+| فاکتور، اقساط، ثبت پرداخت و خروجی مالی | `IMPLEMENTED_AND_VERIFIED` | فرم فارسی، ثبت ۱۰۰٫۰۰ دلار در دو قسط، ثبت ۶۰٫۰۰ دلار و ماندهٔ دقیق ۴۰٫۰۰ دلار، رد شناسهٔ تکراری، ابطال فاکتور بدون پرداخت، CSV و محدودیت کاربر خارج از پروژه در Playwright تأیید شدند. Migration 005 و `test:postgres` ثبت هم‌زمان، ارز ناسازگار، اضافه‌پرداخت و جلوگیری از حذف پرداخت را آزمودند. نرخ تبدیل مستند و تطبیق پرداخت با قرارداد همچنان بازند. |
 | پذیرش کل فاز ۱ | `PARTIAL` | سناریوهای اصلی ماندگاری و روال‌های جدید سبز هستند. تکمیل پوشش مجموعه‌های تاریخی و یکپارچگی همهٔ فرم‌ها باز است. |
 
 `npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ ۲۷‌تایی در Chrome و Firefox سبز شد. WebKit ابتدا یکی از آزمون‌های RTL را با خطای Prefetch هنگام جابه‌جایی اجباری ثبت کرد. آزمون مرور هر مسیر را به سند جدا منتقل کرد و مسیر ۳۹۰ پیکسل در دو اجرای پی‌درپی موفق شد. ۱۳ آزمون تاریخی Workflow همچنان از الگوی دمو استفاده می‌کنند و برای این نسخه تأیید نشده‌اند.
@@ -28,6 +29,10 @@
 اجرای [CI نسخهٔ مبنا](https://github.com/alirava56/progect_os/actions/runs/44632719901) و [CI آزمون‌های تاریخی](https://github.com/alirava56/progect_os/actions/runs/44641957900) در بازیابی PostgreSQL 16 خطا دادند. [اجرای فاز ۱](https://github.com/alirava56/progect_os/actions/runs/44634151927)، [اجرای هزینه و دسترسی](https://github.com/alirava56/progect_os/actions/runs/44635325658) و [اجرای ارجاع Vault](https://github.com/alirava56/progect_os/actions/runs/44642856467) در Windows، Ubuntu، CodeQL و آزمایش‌های PostgreSQL موفق بودند.
 
 در [CI یکپارچه‌سازی GitHub](https://github.com/alirava56/progect_os/actions/runs/44699504089)، ابزار `pg_restore` صفر بایت محتوای رمزگشایی‌شده گزارش داد. `pg_dump` می‌توانست پیش از اتصال خوانندهٔ رمزنگار خارج شود. در `scripts/postgres-archive.mjs` خواندن جریان بلافاصله شروع می‌شود و فایل خالی منتشر نمی‌شود. `test:postgres` محلی بررسی مستقل فهرست اشیای آرشیو و Restore را پاس کرد. مجموعهٔ قبلی WebKit با ۳۰/۳۰ پاس شد و Firefox در ۲۹/۳۰ روی انتظار برای درخواست‌های پس‌زمینه متوقف شد. انتظار پایان Prefetch اکنون به WebKit محدود است و عرض ۱۴۴۰ در Firefox دو بار موفق شد. وضعیت انتشار **NO-GO** است. جدول زیر سند اجرای ۱۹ نوامبر است.
+
+Job یکپارچهٔ Migration و بازیابی PostgreSQL 16 پس از اصلاح جریان موفق شد. [CI اصلاح Backup](https://github.com/alirava56/progect_os/actions/runs/44700733566)
+
+نسخهٔ فاکتور Build، TypeScript و ESLint را پاس کرد. `test:smoke` در Chrome با ۳۱/۳۱، `test:core` با ۴۶/۴۶، `test:postgres` با یک نتیجه و `test:postgres-http` با آزمون HTTP روی PostgreSQL 17.12 موفق بودند. فایل‌های اصلی `src/components/invoice-ledger.tsx`، `src/lib/server/db.ts`، `src/lib/server/validation.ts`، `schema/postgres/005_invoice_records.sql` و `tests/release.spec.ts` هستند.
 
 **حکم انتشار Production: NO-GO**
 
