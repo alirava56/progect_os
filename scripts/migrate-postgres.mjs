@@ -8,6 +8,7 @@ const migrations = [
   ['004_machine_disk_metrics', new URL('../schema/postgres/004_machine_disk_metrics.sql', import.meta.url)],
   ['005_invoice_records', new URL('../schema/postgres/005_invoice_records.sql', import.meta.url)],
   ['006_exchange_rate_records', new URL('../schema/postgres/006_exchange_rate_records.sql', import.meta.url)],
+  ['007_record_identity', new URL('../schema/postgres/007_record_identity.sql', import.meta.url)],
 ];
 const client = await getPostgresPool().connect();
 try {

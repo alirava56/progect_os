@@ -153,6 +153,17 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     await assert.rejects(commitRecordChanges(owner, before.version, [edit('alpha', 'stale')]), /changed/);
     const record = await sql.one("SELECT payload FROM records WHERE kind='projects' AND id='alpha'");
     assert.equal(JSON.parse(record.payload).next, 'independent A');
+    const identityProbe = new Client({connectionString:connectionFor(target)});
+    try {
+      await identityProbe.connect();
+      await assert.rejects(identityProbe.query(
+        "UPDATE records SET payload=(payload::jsonb || jsonb_build_object('projectId','beta'))::text WHERE kind='docs'",
+      ), {code:'23514', constraint:'records_payload_identity'});
+      await assert.rejects(identityProbe.query(
+        "UPDATE records SET project_id=NULL WHERE kind='docs'",
+      ), {code:'23514', constraint:'records_payload_identity'});
+      assert.equal((await identityProbe.query("SELECT project_id FROM records WHERE kind='docs'")).rows[0].project_id,'alpha');
+    } finally { await identityProbe.end(); }
 
     const report = JSON.parse(run('postgres-backup.mjs','backup',postgresBackup));
     assert.equal(report.encrypted, true);
