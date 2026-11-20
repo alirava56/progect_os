@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process');
 const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
+const { Readable } = require('node:stream');
 const ts = require('typescript');
 const { Client } = require('pg');
 
@@ -65,7 +66,10 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
       create('projects', project('beta')),
       create('docs', {id:'doc', projectId:'alpha', title:'آزمون', type:'Runbook', body:'Synthetic runbook', revision:1, updated:'2026-11-18'}),
       create('reminders', {id:'rem', projectId:'alpha', title:'Synthetic reminder', due:'2026-11-18', kind:'یادآوری'}),
-      create('secrets', {id:'ref', projectId:'alpha', name:'Vault pointer', type:'SSH Key', vaultProvider:'1Password', externalRef:'https://start.1password.com/open/i?i=synthetic'}),
+      create('resources', {id:'vps', name:'Synthetic VPS', projectId:'alpha', linkedProjectIds:[], type:'server',
+        address:'203.0.113.10', environment:'Development', status:'registered', provider:'Fixture host', tags:[]}),
+      create('secrets', {id:'ref', projectId:'alpha', resourceId:'vps', name:'Vault pointer', type:'SSH Key',
+        vaultProvider:'1Password', externalRef:'https://start.1password.com/open/i?i=synthetic'}),
     ]);
     const inv = await createInvitation(owner, 'postgres-editor@example.test', 'editor', ['alpha']);
     const editorId = await acceptInvitation({token:inv.token,email:'postgres-editor@example.test',password,displayName:'Test editor'});
@@ -75,7 +79,7 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     run('encrypted-backup.mjs', legacyBackup);
     await closeDatabase();
     const plan = JSON.parse(run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--dry-run'));
-    assert.equal(plan.counts.records, 5);
+    assert.equal(plan.counts.records, 6);
     assert.equal(plan.counts.document_versions, 1);
     assert.equal(plan.counts.notification_outbox, 1);
     assert.equal(plan.counts.memberships, 2);
@@ -109,6 +113,8 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.equal(await authenticate(ownerEmail, password), uid);
     assert.equal(await lookupSessionUserId(archivedSession), uid);
     assert.deepEqual((await loadState(owner)).data.docs, before.data.docs);
+    assert.deepEqual((await loadState(owner)).data.secrets, before.data.secrets);
+    await assert.rejects(commitRecordChanges(owner, before.version, [{kind:'resources', id:'vps', action:'delete'}]), /Vault references/);
     assert.deepEqual((await loadState(await accountByUser(editorId))).data.projects.map(project => project.id), ['alpha']);
     const edit = (id, next) => ({ kind:'projects', id, action:'replace', record:{...project(id), next} });
     const [one, two] = await Promise.all([
@@ -122,16 +128,22 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
 
     const report = JSON.parse(run('postgres-backup.mjs','backup',postgresBackup));
     assert.equal(report.encrypted, true);
+    const invalidBackup = join(area, 'invalid.posbak');
+    const { encryptArchive, postgresHeader } = await import('./encrypted-archive.mjs');
+    await encryptArchive(Readable.from([Buffer.from('Synthetic text in place of a PostgreSQL archive')]),
+      invalidBackup, process.env.PROJECTOS_BACKUP_PASSPHRASE, postgresHeader);
+    assert.throws(() => run('postgres-backup.mjs','restore',invalidBackup), /PostgreSQL restore catalog failed/);
     const restored = JSON.parse(run('postgres-backup.mjs','restore',postgresBackup));
     assert.equal(Number(restored.workspaces), 1);
     assert.equal(Number(restored.document_versions), 1);
-    assert.equal(Number(restored.records), 5);
+    assert.equal(Number(restored.records), 6);
     assert.throws(() => run('postgres-backup.mjs','restore',postgresBackup));
     await closeDatabase();
     process.env.PROJECTOS_DATABASE_URL = connectionFor(restoreTarget);
     assert.equal(await authenticate(ownerEmail, password), uid);
     const current = await loadState(owner);
     assert.equal(current.data.projects.find(item => item.id === 'beta').next, 'independent B');
+    assert.equal(current.data.secrets.find(item => item.id === 'ref').resourceId, 'vps');
     assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?','outbox-fixture')).state, 'delivered');
   } finally {
     await closeDatabase();

@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { getDb, lockWorkspace, readTransaction, sql, transaction, type SqlExecutor } from '../../../scripts/database.mjs';
 import { emptyData } from '../empty-data';
 import { isRecordKind, recordKinds, type RecordKind, type WorkspaceRecord } from '../record-contract';
-import type { ActivityEvent, DemoData, Preferences, RecurringCharge, Resource } from '../types';
+import type { ActivityEvent, DemoData, Preferences, Resource } from '../types';
 import { redactStoredValue, redactCredentials } from './credential-guard';
 import { ValidationError, type CanonicalState } from './validation';
 
@@ -204,6 +204,17 @@ function automationFields(record: object) {
   return Object.fromEntries(Object.entries(record).filter(([field]) => field !== 'state' && field !== 'snoozedUntil'));
 }
 
+function resourceLink(kind: RecordKind, record?: WorkspaceRecord) {
+  if (kind === 'charges') {
+    const charge = record as DemoData['charges'][number] | undefined;
+    if (charge?.linkedResourceId) return {id:charge.linkedResourceId, projectId:charge.projectId};
+  }
+  if (kind === 'secrets') {
+    const reference = record as DemoData['secrets'][number] | undefined;
+    if (reference?.resourceId) return {id:reference.resourceId, projectId:reference.projectId};
+  }
+}
+
 export async function persistChanges(
   db: SqlExecutor, account: Account, version: number, changes: PreparedChange[], preferences?: Preferences,
 ) {
@@ -239,15 +250,15 @@ export async function persistChanges(
         throw new ForbiddenError();
       }
     }
-    if (kind === 'charges' && record) {
-      const charge = record as RecurringCharge;
-      const prior = before as RecurringCharge | undefined;
-      if (charge.linkedResourceId && (charge.linkedResourceId !== prior?.linkedResourceId || charge.projectId !== prior?.projectId)) {
-        const pending = resourceChanges.get(charge.linkedResourceId);
-        const stored = pending ? undefined : await storedRecord(db, workspaceId, 'resources', charge.linkedResourceId);
+    const link = resourceLink(kind, record);
+    if (link) {
+      const prior = resourceLink(kind, before);
+      if (link.id !== prior?.id || link.projectId !== prior?.projectId) {
+        const pending = resourceChanges.get(link.id);
+        const stored = pending ? undefined : await storedRecord(db, workspaceId, 'resources', link.id);
         const resource = (pending?.record as Resource | undefined) ?? (stored ? JSON.parse(stored.payload) as Resource : undefined);
-        if (!resource || (resource.projectId !== charge.projectId && !resource.linkedProjectIds?.includes(charge.projectId))) {
-          throw new ValidationError('Charge resource must belong to or be shared with the charge project');
+        if (!resource || (resource.projectId !== link.projectId && !resource.linkedProjectIds?.includes(link.projectId))) {
+          throw new ValidationError('Linked resource must belong to or be shared with the record project');
         }
       }
     }

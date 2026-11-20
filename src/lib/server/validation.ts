@@ -12,7 +12,7 @@ const ruleSets={
   projects:{id:s(100),name:s(100),subtitle:s(150),coverTitle:s(150),description:s(4000),status:s(30,false,['building','review','active','archived']),archivedFrom:s(30,true,['building','review','active']),type:s(70),progress:n(100),next:s(400),art:s(100)},
   tasks:{id:s(100),title:s(200),projectId:s(100),status:s(20,false,['todo','doing','blocked','review','done']),priority:s(20,false,['low','medium','high']),owner:s(100),due:s(32),description:s(10000),checklist:{type:'checklist',max:200},comments:{type:'comments',max:500},dependencies:str(80)},
   resources:{id:s(100),name:s(160),projectId:s(100),type:s(24,false,['server','domain','database','service']),address:s(350),environment:s(50,false,['Production','Staging','Development']),status:s(25,false,['registered','review','missing']),provider:s(160),region:s(120,true),os:s(120,true),port:n(65535,true),expires:s(32,true),parentId:s(100,true),tags:str(20),linkedProjectIds:str(100)},
-  secrets:{id:s(100),name:s(160),projectId:s(100),type:s(30,false,['SSH Key','API Token','Account','DB Credential']),
+  secrets:{id:s(100),name:s(160),projectId:s(100),resourceId:s(100,true),type:s(30,false,['SSH Key','API Token','Account','DB Credential']),
     vaultProvider:s(160),lastCheckedAt:s(32,true),externalRef:s(500,true),vaultMount:s(80,true),vaultPath:s(240,true),rotationDue:s(32,true)},
   reminders:{id:s(100),title:s(180),projectId:s(100),due:s(32),kind:s(20,false,['جلسه','تمدید','یادآوری']),
     repeat:s(20,true,['none','daily','weekly','monthly','yearly']),zone:s(100,true),paused:{type:'boolean',optional:true}},
@@ -217,6 +217,8 @@ export function parseState(value:unknown):CanonicalState {
     if (resource.linkedProjectIds?.some(id => !projects.has(id))) bad('Invalid shared resource project');
   for (const charge of state.charges)
     if (charge.linkedResourceId && !resources.has(charge.linkedResourceId)) bad('Invalid charge resource reference');
+  for (const reference of state.secrets)
+    if (reference.resourceId && !resources.has(reference.resourceId)) bad('Invalid Vault resource reference');
   validateGraph(new Map(state.resources.map(resource => [resource.id, resource.parentId ? [resource.parentId] : []])), 'resource parents');
   validateGraph(new Map(state.tasks.map(task => [task.id, task.dependencies])), 'task dependencies');
   return state;

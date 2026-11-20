@@ -54,6 +54,7 @@ export interface SecretReference {
   id: string;
   name: string;
   projectId: string;
+  resourceId?: string;
   type: 'SSH Key' | 'API Token' | 'Account' | 'DB Credential';
   vaultProvider: string;
   lastCheckedAt?: string;

@@ -48,7 +48,7 @@ async function validateRelations(db: SqlExecutor, workspaceId: string, changes: 
     }
   }
 
-  async function graphRows<Kind extends 'tasks' | 'resources' | 'charges'>(kind: Kind) {
+  async function graphRows<Kind extends 'tasks' | 'resources' | 'charges' | 'secrets'>(kind: Kind) {
     const rows = await db.all<RecordRow>('SELECT kind,id,project_id,payload,record_version FROM records WHERE workspace_id=? AND kind=?',
       workspaceId, kind);
     type Item = DemoData[Kind][number];
@@ -63,6 +63,14 @@ async function validateRelations(db: SqlExecutor, workspaceId: string, changes: 
   if (updates.some(change => change.kind === 'tasks')) {
     const tasks = await graphRows('tasks');
     validateGraph(new Map([...tasks].map(([id, task]) => [id, task.dependencies])), 'task dependencies');
+  }
+
+  const removedResources = new Set(updates.filter(change => change.kind === 'resources' && !change.record).map(change => change.id));
+  if (removedResources.size) {
+    const references = await graphRows('secrets');
+    if ([...references.values()].some(reference => reference.resourceId && removedResources.has(reference.resourceId))) {
+      throw new ValidationError('Resource still has Vault references');
+    }
   }
 
   if (updates.some(change => change.kind === 'resources' || change.kind === 'charges') || removedProjects.size) {

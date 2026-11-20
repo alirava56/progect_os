@@ -25,6 +25,8 @@ Application API responses containing workspace or authentication data are privat
 | `/api/assistant` | POST | Permission-aware project sources. External requests require explicit query approval and server opts. Returned model selections must occur verbatim in available sources. |
 | `/api/health` | GET | Readiness status without identifiers or sensitive metadata. |
 
+Vault references may carry an optional `resourceId`. At write time the resource must belong to, or be shared with, the reference project. The record API rejects resource deletion while a Vault reference remains attached. PostgreSQL and SQLite store the optional field in the existing record payload and continue to read earlier references without backfill.
+
 Example request with the latest usable Workspace watermark.
 
 ```json

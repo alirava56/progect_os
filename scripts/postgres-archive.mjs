@@ -6,6 +6,16 @@ import { basename } from 'node:path';
 import pg from 'pg';
 import { decryptArchive, encryptArchive, postgresHeader } from './encrypted-archive.mjs';
 
+const diagnostics = [
+  [/could not open .*file/i, 'archive or catalog file could not be opened'],
+  [/invalid archive|not .*valid archive|unsupported version|invalid TOC/i, 'archive or catalog format rejected'],
+  [/already exists/i, 'database object already exists'],
+  [/permission denied|must be owner/i, 'database or file permission denied'],
+  [/authentication failed|connection .* failed|could not connect/i, 'database connection failed'],
+  [/unrecognized configuration parameter/i, 'client and server settings are incompatible'],
+  [/could not execute query/i, 'database rejected a restore command'],
+];
+
 function connection(value) {
   const url = new URL(value);
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.search || url.hash || !url.username || !url.pathname.slice(1)) {
@@ -23,16 +33,25 @@ function connection(value) {
       PGSSLMODE: loopback ? 'disable' : 'verify-full',
       ...(process.env.PGSSLROOTCERT ? { PGSSLROOTCERT: process.env.PGSSLROOTCERT } : {}),
       PGCONNECT_TIMEOUT: '5',
+      LC_ALL: 'C',
     },
   };
 }
 
 function run(program, args, config) {
   const bin = process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN, program) : program;
-  const child = spawn(bin, args, { env: config.env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  const operation = program === 'pg_dump' ? 'PostgreSQL dump' : args.includes('--list') ? 'PostgreSQL restore catalog' : 'PostgreSQL restore';
+  const child = spawn(bin, args, { env: config.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let stderr = '';
+  child.stderr.on('data', chunk => { if (stderr.length < 4096) stderr = (stderr + chunk.toString()).slice(0, 4096); });
   const completion = new Promise((ok, fail) => {
-    child.once('error', () => fail(new Error(program + ' could not start')));
-    child.once('close', code => code === 0 ? ok() : fail(new Error(program + ' failed')));
+    child.once('error', () => fail(new Error(operation + ' could not start')));
+    child.once('close', (code, signal) => {
+      if (code === 0) { ok(); return; }
+      // pg_restore may print the offending SQL and its data. Return a fixed diagnostic only.
+      const reason = diagnostics.find(([pattern]) => pattern.test(stderr))?.[1];
+      fail(new Error(operation + ' failed (' + (signal ?? 'exit ' + code) + (reason ? ', ' + reason : '') + ')'));
+    });
   });
   // Attach immediately because dump/encryption and subprocess exit are asynchronous.
   completion.catch(() => {});

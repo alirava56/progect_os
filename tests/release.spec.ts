@@ -335,3 +335,60 @@ test('secure login and the three-step onboarding save a real workspace and its o
   expect(data.preferences.workspace).toBe(workspace);
   expect(data.tasks).toEqual([expect.objectContaining({title:'مرور برنامه تحویل', owner:data.users[0].id})]);
 });
+
+test('owners can attach Vault metadata to a VPS and other roles cannot retrieve it', async ({page, origin, appURL}) => {
+  await bootstrap(page.request, origin);
+  const vps = {id:'nas-vps', name:'Synthetic VPS', projectId:'primary', linkedProjectIds:[], type:'server',
+    address:'203.0.113.5', environment:'Development', status:'registered', provider:'Fixture host', tags:[]};
+  const seed = await page.request.patch('/api/records', {headers:origin, data:{version:0, changes:[
+    create('projects', project('primary')), create('projects', project('unrelated')), create('resources', vps),
+  ]}});
+  expect(seed.status()).toBe(200);
+  await page.goto('/infrastructure/servers/nas-vps');
+  await page.getByRole('link', {name:'ارجاع‌های خزانهٔ این سرور'}).click();
+  await expect(page).toHaveURL('/vault?resource=nas-vps');
+  await page.getByRole('button', {name:'افزودن ارجاع', exact:true}).click();
+  const dialog = page.getByRole('dialog', {name:'افزودن ارجاع'});
+  await expect(dialog.getByLabel('منبع مرتبط')).toHaveValue('nas-vps');
+  await dialog.getByLabel('عنوان ارجاع').fill('کلید آزمون VPS');
+  await dialog.getByLabel('محل خزانه').fill('HashiCorp Vault');
+  await dialog.getByLabel('Mount فراداده برای HashiCorp Vault').fill('synthetic-kv');
+  const save = dialog.getByRole('button', {name:'ثبت ارجاع', exact:true});
+  await save.click();
+  await expect(dialog.getByRole('alert')).toContainText('مسیر فراداده');
+  await dialog.getByLabel('مسیر فراداده برای HashiCorp Vault').fill('test/ssh');
+  await save.click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole('button', {name:'کلید آزمون VPS', exact:true}).click();
+  const details = page.getByRole('dialog', {name:'جزئیات ارجاع'});
+  await expect(details.getByText('test/ssh', {exact:true})).toBeVisible();
+  await expect(details.getByRole('status')).toHaveText('اتصال تنظیم نشده');
+
+  const data = await (await page.request.get('/api/state')).json();
+  const [reference] = data.data.secrets;
+  expect(reference).toEqual(expect.objectContaining({resourceId:'nas-vps', vaultMount:'synthetic-kv', vaultPath:'test/ssh'}));
+  const check = '/api/vault/' + reference.id;
+  expect((await page.request.post(check, {headers:origin, data:{password:'invalid-fixture-password'}})).status()).toBe(403);
+  const confirmed = await page.request.post(check, {headers:origin, data:{password}});
+  expect(confirmed.status()).toBe(200);
+  expect(await confirmed.json()).toEqual({status:'not_configured', checkedAt:null, providerVersion:null});
+  const saveChanges = (changes:unknown[]) => page.request.patch('/api/records', {headers:origin, data:{version:data.version, changes}});
+  expect((await saveChanges([create('secrets', {...reference, id:'unrelated-ref', projectId:'unrelated'})])).status()).toBe(422);
+  expect((await saveChanges([create('secrets', {...reference, id:'raw-ref', rawValue:'synthetic-fixture-only'})])).status()).toBe(422);
+  expect((await saveChanges([{kind:'resources', id:vps.id, action:'delete'}])).status()).toBe(422);
+
+  const memberEmail = 'vault-viewer@example.test';
+  const member = await testRequest(appURL);
+  try {
+    const invitation = await page.request.post('/api/team/invitations', {headers:origin,
+      data:{email:memberEmail, role:'viewer', projectIds:['primary']}});
+    expect(invitation.status()).toBe(200);
+    const accepted = await member.post('/api/auth/accept-invite', {headers:origin,
+      data:{token:(await invitation.json()).token, email:memberEmail, password, displayName:'Scoped viewer'}});
+    expect(accepted.status()).toBe(200);
+    expect((await member.get('/api/records/resources/nas-vps')).status()).toBe(200);
+    expect((await member.get(check)).status()).toBe(404);
+    expect((await member.get('/api/records/secrets/' + reference.id)).status()).toBe(404);
+    expect((await (await member.get('/api/state')).json()).data.secrets).toEqual([]);
+  } finally { await member.dispose(); }
+});
