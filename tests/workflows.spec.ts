@@ -1,19 +1,29 @@
 import { expect } from '@playwright/test';
 import { defaultData } from '../src/lib/fixtures';
-import { setupToken, test } from './isolated-app';
+import { setupToken, test, testRequest } from './isolated-app';
 
-test.beforeEach(async ({page,origin})=>{
-  const session=await page.request.post('/api/auth/setup',{headers:origin,data:{
-    setupToken,email:'workflows-owner@example.test',password:'synthetic-workflows-suite-only',
-    displayName:'Workflow QA',workspace:'Workflow QA',
-  }});
-  expect(session.status()).toBe(200);
-  const kinds=['projects','tasks','resources','reminders','incidents','expenses','docs'] as const;
-  const seeded=await page.request.patch('/api/records',{headers:origin,data:{version:0,
-    changes:kinds.flatMap(kind=>defaultData[kind].map(record=>({kind,id:record.id,action:'create',
-      record:kind==='resources'?{...record,linkedProjectIds:[]}:record}))),
-  }});
-  expect(seeded.status(),await seeded.text()).toBe(200);
+test.use({
+  storageState:async ({appURL,origin},provide)=>{
+    const api=await testRequest(appURL);
+    try {
+      const health=await api.get('/api/health');
+      expect(health.status()).toBe(200);
+      const session=await api.post('/api/auth/setup',{headers:origin,data:{
+        setupToken,email:'workflows-owner@example.test',password:'synthetic-workflows-suite-only',
+        displayName:'Workflow QA',workspace:'Workflow QA',
+      }});
+      expect(session.status()).toBe(200);
+      const kinds=['projects','tasks','resources','reminders','incidents','expenses','docs'] as const;
+      const seeded=await api.patch('/api/records',{headers:origin,data:{version:0,
+        changes:kinds.flatMap(kind=>defaultData[kind].map(record=>({kind,id:record.id,action:'create',
+          record:kind==='resources'?{...record,linkedProjectIds:[]}:record}))),
+      }});
+      expect(seeded.status(),await seeded.text()).toBe(200);
+      const state=await api.storageState();
+      expect(state.cookies).toHaveLength(1);
+      await provide(state);
+    } finally { await api.dispose(); }
+  },
 });
 
 test('global search, keyboard dialog, no-results, and nested navigation', async ({ page }) => {

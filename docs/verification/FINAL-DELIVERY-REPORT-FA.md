@@ -53,6 +53,7 @@ Job یکپارچهٔ Migration و بازیابی PostgreSQL 16 پس از اصل�
 - `npm run test:postgres` روی PostgreSQL 17.12 با یک سناریوی ترتیبی کامل و `npm run test:postgres-http` روی Build تولید موفق بودند. آزمون Restore دوم، فاکتور، پرداخت و نرخ دارای منبع را پس از بازیابی بررسی کرد. `npm run test:project-lifecycle -- --workers=1` با TLS لوکال هر سه سناریو را پاس کرد. تنظیم اعتبار گواهی آزمایشی فقط برای نشانی Loopback در `tests/project-lifecycle.spec.ts` اعمال می‌شود.
 - بررسی SQLite روی نسخهٔ کاملاً ساختگی با `backup`، `verify:backup`، `test:restore`، `backup:encrypted` و `verify:encrypted-backup` موفق بود. در آزمون Restore یک Workspace و یک پروژه بازیابی شدند و بررسی کلید خارجی خطا نداشت.
 - مقایسهٔ `public/` با مبنای ZIP هیچ تغییری در ۳۲ آیکون نشان نداد. `npm audit --audit-level=high` برای وابستگی‌های قفل‌شده خطایی گزارش نکرد. اجرای Build و آزمایش‌ها در این مرحله با داده و سرویس آزمایشی انجام شد.
+- در اجرای `5f5df09`، سه Job میزبانی‌شده موفق شدند و شش Workflow ویندوز در درخواست راه‌اندازی دادهٔ تست به مهلت ۱۲ ثانیه رسیدند. Fixture اکنون آمادگی دیتابیس را بررسی می‌کند و پیش از بازکردن مرورگر با یک نشست API جداگانه دادهٔ تست را می‌سازد. تمام Assertionهای سناریوها حفظ شدند. اجرای ترتیبی `npm run test:workflows -- --workers=1` هر ۱۳ سناریو را در Windows محلی پاس کرد. Windows CI همین فرمان را اجرا می‌کند. [اجرای دارای خطای آماده‌سازی](https://github.com/alirava56/progect_os/actions/runs/44706697205)
 
 ### وضعیت جاری Gateها
 
