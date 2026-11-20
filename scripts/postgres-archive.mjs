@@ -3,12 +3,15 @@ import { mkdtemp, rm, unlink, link, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { basename } from 'node:path';
+import { PassThrough } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import pg from 'pg';
 import { decryptArchive, encryptArchive, postgresHeader } from './encrypted-archive.mjs';
 
 const diagnostics = [
   [/could not open .*file/i, 'archive or catalog file could not be opened'],
   [/invalid archive|not .*valid archive|unsupported version|invalid TOC/i, 'archive or catalog format rejected'],
+  [/input file is too short|unexpected end of file/i, 'archive content is incomplete'],
   [/already exists/i, 'database object already exists'],
   [/permission denied|must be owner/i, 'database or file permission denied'],
   [/authentication failed|connection .* failed|could not connect/i, 'database connection failed'],
@@ -65,15 +68,21 @@ export async function backupPostgres(destination, connectionString, passphrase) 
   const {randomUUID} = await import('node:crypto');
   const temporary = join(dirname(finalPath), '.' + basename(finalPath) + '.' + randomUUID() + '.part');
   const { child, completion } = run('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', '--schema=public'], config);
+  // Attach immediately so a short-lived pg_dump cannot exit before Node observes its stdout.
+  const buffered=new PassThrough();
+  const consumed=pipeline(child.stdout,buffered);
+  consumed.catch(()=>{});
   try {
-    await encryptArchive(child.stdout, temporary, passphrase, postgresHeader);
-    await completion;
+    const bytes=await encryptArchive(buffered, temporary, passphrase, postgresHeader);
+    await Promise.all([completion,consumed]);
+    if (bytes===0) throw new Error('PostgreSQL dump returned no archive');
     // Atomic publication, including refusal to overwrite an existing backup.
     await link(temporary, finalPath);
     return { ok: true, format: 'PROJECTOS-POSTGRES-v1', encrypted: true, streaming: true };
   } finally {
-    if (child.exitCode === null) child.kill();
-    await completion.catch(() => {});
+    buffered.destroy();
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await Promise.allSettled([completion,consumed]);
     await unlink(temporary).catch(() => {});
   }
 }

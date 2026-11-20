@@ -28,7 +28,7 @@ test.beforeEach(async ({page, origin}) => {
 });
 
 for (const width of widths) {
-  test(`21 RTL routes at ${width}px`, async ({ context }) => {
+  test(`21 RTL routes at ${width}px`, async ({ context, browserName }) => {
     test.setTimeout(120_000);
     const errors: string[] = [];
     const external = new Set<string>();
@@ -69,9 +69,8 @@ for (const width of widths) {
             await mkdir(shots, { recursive: true });
             await page.screenshot({ path: path.join(shots,`${width}-${key}.png`),fullPage:true,animations:'disabled' });
           }
-          // Finish each document's requests before closing it. A forced navigation in the same
-          // page can interrupt a WebKit prefetch and report the interruption as a page error.
-          await page.waitForLoadState('networkidle', {timeout:12_000});
+          // WebKit can report an interrupted prefetch while tearing down the document.
+          if (browserName==='webkit') await page.waitForLoadState('networkidle', {timeout:12_000});
         } finally { await page.close(); }
       });
     }

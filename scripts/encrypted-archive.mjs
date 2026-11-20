@@ -31,12 +31,19 @@ export async function encryptArchive(input, destination, passphrase, header) {
   const handle = await open(destination, 'wx', 0o600);
   try {
     await writeAll(handle, prefix);
-    for await (const chunk of input) await writeAll(handle, cipher.update(chunk));
-    await writeAll(handle, cipher.final());
+    let payloadBytes=0;
+    for await (const chunk of input) {
+      const encrypted=cipher.update(chunk);
+      await writeAll(handle, encrypted);
+      payloadBytes+=encrypted.length;
+    }
+    const final=cipher.final();
+    await writeAll(handle, final);
     const tag = cipher.getAuthTag();
     const written = await handle.write(tag, 0, tag.length, prefix.length - tag.length);
     if (written.bytesWritten !== tag.length) throw new Error('Failed to finalize encrypted backup');
     await handle.sync();
+    return payloadBytes+final.length;
   } catch (error) {
     await handle.close().catch(() => {});
     await unlink(destination).catch(() => {});
