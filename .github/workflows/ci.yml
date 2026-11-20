@@ -29,6 +29,7 @@ jobs:
       - if: runner.os == 'Windows'
         run: npx playwright install chromium
       - run: npm run test:smoke
+      - run: npm run test:workflows
 
   postgres-migration-and-recovery:
     runs-on: ubuntu-24.04

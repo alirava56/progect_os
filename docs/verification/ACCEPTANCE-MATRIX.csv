@@ -2,7 +2,7 @@ ID,requirement,priority,implementation,test,evidence,status,blocker
 A01,Windows clean install types lint core build,P0,package lock and bundled pg,local npm commands,evidence-2026-11-19,VERIFIED_LOCAL,
 A02,Production build Playwright and isolated database,P0,isolated-app fixture,original nine plus release cases,evidence-2026-11-19,VERIFIED_LOCAL,
 A03,Linux Windows hosted checks and CodeQL,P0,.github/workflows/ci.yml,GitHub Actions,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_HOSTED,
-A04,Historical test suite parity,P1,real login and isolated seeded workspace,6 responsive and onboarding checks,FINAL-DELIVERY-REPORT-FA.md,PARTIAL,13 workflows need current fixtures and assertions
+A04,Historical test suite parity,P1,real login and isolated seeded workspace,13 workflows plus six responsive widths,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 A05,Project infrastructure persistence after application restart,P0,project detail forms and PostgreSQL runtime,test:project-lifecycle,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 B01,PostgreSQL runtime and SQLite import,P0,sql repository migrations import,test:postgres and test:postgres-http,evidence-2026-11-19,VERIFIED_LOCAL,
 B02,Scoped permission MFA and record concurrency,P0,project grants record versions sessions,core and HTTP negative tests,evidence-2026-11-19,VERIFIED_LOCAL,

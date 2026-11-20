@@ -165,6 +165,16 @@ try {
   assert.ok(!hiddenPage.includes('Verified synthetic activity'));
   assert.equal((await resume(project.id,viewerHeaders)).status,404);
   assert.equal((await resume(otherProject.id,viewerHeaders)).status,200);
+  const writeActivity=body=>fetch(appUrl+'/api/activity',{method:'POST',headers,body:JSON.stringify(body)});
+  const checkpoint={projectId:project.id,title:'Synthetic recorded follow-up',detail:'A local PostgreSQL task fixture.'};
+  assert.equal((await writeActivity({...checkpoint,createTask:'true'})).status,422);
+  assert.equal((await writeActivity({...checkpoint,createTask:true})).status,200);
+  const {data:withFollowUp}=await (await fetch(appUrl+'/api/state',{headers})).json();
+  const task=withFollowUp.tasks.find(item=>item.title===checkpoint.title);
+  assert.ok(task?.id);
+  assert.equal(task.projectId,project.id);
+  assert.equal(withFollowUp.events.filter(item=>item.source==='ثبت دستی'&&item.title===checkpoint.title).length,1);
+  assert.equal((await fetch(appUrl+'/api/records/tasks/'+task.id,{headers:viewerHeaders})).status,404);
   console.log(JSON.stringify({ok:true,mode:'production-build-http-postgresql',machineObservation:'scoped-with-disk',
     github:'project-scoped',memory:'scoped-project-and-activity-citations'}));
 } finally {

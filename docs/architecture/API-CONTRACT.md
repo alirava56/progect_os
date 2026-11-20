@@ -14,7 +14,7 @@ Application API responses containing workspace or authentication data are privat
 | `/api/records/{kind}/{id}` | POST, PUT, DELETE | Bounded record create/replace/delete. `concurrency: "record"` indicates row conflict semantics. Without it, the legacy caller still gets strict workspace revision checks. |
 | `/api/records` | PATCH | Transactional record changes and optional Owner preferences. Errors reject the entire batch. |
 | `/api/docs/history?id=...` | GET | Authorized history, including the project scope of each historical revision. |
-| `/api/activity` | GET, POST | GET with `event` reads one authorized audit event. Missing and hidden events return 404. POST writes Owner activity for a known project, with quota and pattern guard. |
+| `/api/activity` | GET, POST | GET with `event` reads one authorized audit event. Missing and hidden events return 404. POST writes Owner activity for a known project, with quota and pattern guard. Optional `createTask: true` creates a task in the same transaction for an active project. |
 | `/api/team/invitations` | GET, POST, DELETE | Owner invitation list, issue, revoke. `projectIds: null` allows workspace scope. An array defines explicit grants. |
 | `/api/team/members/{id}` | PATCH, DELETE | Owner project grants and membership removal. Revocation takes effect on subsequent requests. |
 | `/api/vault/{id}` | GET, POST | Owner metadata observation. POST requires password and enrolled second factor. |

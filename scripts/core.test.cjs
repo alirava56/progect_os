@@ -358,10 +358,16 @@ test('manual activity validates secrets, workspace ownership, historical actor a
   await assert.rejects(async ()=>(await appendManualActivity(owner,{projectId:'a',title:'Unsafe',detail:'password: test-not-share'})),ActivityValidationError);
   await assert.rejects(async ()=>(await appendManualActivity({...owner,role:'editor'},{projectId:'a',title:'Editor',detail:'Note'})));
   await assert.rejects(async ()=>(await appendManualActivity(owner,{projectId:'another-workspace-project',title:'Invalid',detail:'Note'})),ActivityValidationError);
-  const id=(await appendManualActivity(owner,{projectId:'a',title:'Safe checkpoint',detail:'No credentials'}));
+  const id=(await appendManualActivity(owner,{projectId:'a',title:'Safe checkpoint',detail:'No credentials',createTask:true}));
   const row=getDb().prepare('SELECT actor_snapshot,action FROM audit_events WHERE id=?').get(id);
   assert.equal(row.actor_snapshot,owner.displayName);
   assert.equal(row.action,'No credentials');
+  const checkpoint=(await loadState(owner)).data.tasks.find(task=>task.title==='Safe checkpoint');
+  assert.equal(checkpoint.projectId,'a');
+  assert.equal(checkpoint.description,'No credentials');
+  await assert.rejects(appendManualActivity(owner,{projectId:'a',title:'Invalid flag',detail:'No credentials',
+    createTask:'true'}),ActivityValidationError);
+  assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM audit_events WHERE title='Invalid flag'").get().n,0);
   for(let n=1;n<30;n++)(await appendManualActivity(owner,{projectId:'a',title:'Checkpoint '+n,detail:'Safe note'}));
   await assert.rejects(async ()=>(await appendManualActivity(owner,{projectId:'a',title:'Excess',detail:'Safe note'})),ActivityRateLimitError);
 });

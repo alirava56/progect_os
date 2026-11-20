@@ -136,6 +136,7 @@ const eventSources: Record<string, string> = {
   reminders: 'تقویم', incidents: 'هشدارها', secrets: 'خزانه', expenses: 'مالی',
   charges: 'اشتراک‌ها', contracts: 'قراردادها', revenues: 'درآمد',
   invoices: 'فاکتورها', payments: 'پرداخت‌ها',
+  manual: 'ثبت دستی',
 };
 type EventRow = Pick<ActivityEvent, 'id' | 'title' | 'projectId' | 'date'> & {
   kind: string; action: string; actorSnapshot: string; fallbackActor: string | null;

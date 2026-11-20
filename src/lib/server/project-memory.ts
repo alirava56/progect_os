@@ -38,11 +38,11 @@ export async function resumeProject(account: Account, projectId: string) {
     type Event = {id:string;title:string;action:string;kind:string;created_at:string;actor_id:string|null};
     const latest=await db.one<Event>(`SELECT id,title,action,kind,created_at,actor_id FROM audit_events
       WHERE workspace_id=? AND project_id=? AND kind IN ('manual','projects','tasks','docs')
-      ORDER BY created_at DESC,id DESC LIMIT 1`,workspace,projectId);
+      ORDER BY created_at DESC,CASE WHEN kind='manual' THEN 0 ELSE 1 END,id DESC LIMIT 1`,workspace,projectId);
     const personal=latest?.actor_id===account.id ? undefined : await db.one<Event>(
       `SELECT id,title,action,kind,created_at,actor_id FROM audit_events
        WHERE workspace_id=? AND project_id=? AND actor_id=? AND kind IN ('manual','projects','tasks','docs')
-       ORDER BY created_at DESC,id DESC LIMIT 1`,workspace,projectId,account.id);
+       ORDER BY created_at DESC,CASE WHEN kind='manual' THEN 0 ELSE 1 END,id DESC LIMIT 1`,workspace,projectId,account.id);
     const notes:string[]=[];
     const citations:Citation[]=[];
     for (const [label,event] of [['آخرین فعالیت ثبت‌شده',latest],['آخرین فعالیت ثبت‌شدهٔ شما',personal]] as const) {

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "playwright test --config=playwright.smoke.config.ts",
     "test:smoke": "playwright test --config=playwright.smoke.config.ts",
+    "test:workflows": "playwright test --config=playwright.config.ts workflows.spec.ts",
     "test:project-lifecycle": "playwright test --config=playwright.project-lifecycle.config.ts",
     "reminders": "node scripts/run-reminders.mjs",
     "monitors": "node scripts/run-monitors.mjs",

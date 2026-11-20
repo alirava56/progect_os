@@ -25,7 +25,8 @@ export function ActivityLog({selected}:{selected?:ActivityEvent}) {
     const title=String(fd.get('title')||'').trim(),detail=String(fd.get('detail')||'').trim(),projectId=String(fd.get('project')||'');
     if(!title||!detail){setError('عنوان و شرح رویداد را وارد کنید.');setSaving(false);return;}
     try{
-      const response=await fetch('/api/activity',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,detail,projectId})});
+      const response=await fetch('/api/activity',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({title,detail,projectId,createTask:fd.has('createTask')})});
       if(!response.ok)throw new Error('رویداد ذخیره نشد.');
       form.reset();
       // The authoritative activity stream is built on the server, never forged by the client.
@@ -55,7 +56,7 @@ export function ActivityLog({selected}:{selected?:ActivityEvent}) {
           <ProjectField initial={projectScope} key={projectScope} />
           <Field label="عنوان رویداد"><input required name="title" maxLength={85} placeholder="مثلاً مرور چک‌لیست انتشار" /></Field>
           <Field label="چه اتفاقی افتاد؟"><textarea name="detail" rows={5} maxLength={500} required placeholder="توضیح کوتاهی از تغییر یا تصمیم ثبت کنید…" /></Field>
-<p className="muted">ثبت رویداد و ایجاد وظیفه، عملیات جداگانه هستند. رویدادها با شناسه حساب واقعی ثبت می‌شوند.</p>
+          <label><input name="createTask" type="checkbox"/> هم‌زمان یک وظیفه بساز</label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <div><Button variant="primary" type="submit" disabled={saving}>{saving?'در حال ثبت…':'ثبت رویداد'}</Button></div>
         </form>

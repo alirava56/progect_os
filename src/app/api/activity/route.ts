@@ -4,6 +4,7 @@ import { appendManualActivity,ActivityValidationError,ActivityRateLimitError } f
 import { validRecordId } from '@/lib/record-contract';
 import { ForbiddenError, loadActivityById } from '@/lib/server/db';
 import { apiError, noStore } from '@/lib/server/http';
+import { ValidationError } from '@/lib/server/validation';
 export const runtime='nodejs';
 const headers={'Cache-Control':'no-store'};
 export async function GET(request:NextRequest) {
@@ -30,7 +31,7 @@ export async function POST(request:NextRequest){
     if(error instanceof RequestBodyTooLargeError)return NextResponse.json({error:'Payload too large'},{status:413,headers});
     if(error instanceof ForbiddenError)return NextResponse.json({error:'Forbidden'},{status:403,headers});
     if(error instanceof ActivityRateLimitError)return NextResponse.json({error:'Too many activity entries'},{status:429,headers});
-    if(error instanceof ActivityValidationError)return NextResponse.json({error:'Invalid activity details'},{status:422,headers});
+    if(error instanceof ActivityValidationError||error instanceof ValidationError)return NextResponse.json({error:'Invalid activity details'},{status:422,headers});
     return NextResponse.json({error:'Invalid JSON or unavailable service'},{status:400,headers});
   }
 }

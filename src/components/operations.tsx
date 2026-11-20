@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity, Bell, Check, CircleAlert, Clock3, Radio } from 'lucide-react';
+import { Activity, Bell, Check, CircleAlert, Clock3, Radio, RefreshCw } from 'lucide-react';
 import { afterHours, dateLabel, matches, resourceHref } from '@/lib/format';
 import { choices, incidentStates, priorities, priorityTones } from '@/lib/labels';
 import { machineObservationFresh, type MachineObservation } from '@/lib/monitoring';
@@ -16,6 +16,8 @@ export function Monitoring() {
   const [observations,setObservations]=useState<Array<{resourceId:string;checkedAt:string;state:string;statusCode:number|null;latencyMs:number|null;tlsExpiresAt:string|null}>>([]);
   const [machine,setMachine]=useState<MachineObservation[]>([]);
   const [monitorStatus,setMonitorStatus]=useState<'loading'|'not_configured'|'configured'|'error'>('loading');
+  const [requestCycle,setRequestCycle]=useState(0);
+  const [range,setRange]=useState('day');
   useEffect(()=>{
     let cancelled=false;
     fetch('/api/monitoring',{cache:'no-store'}).then(async response=>{
@@ -28,7 +30,7 @@ export function Monitoring() {
       setMonitorStatus(payload.status==='configured'?'configured':'not_configured');
     }).catch(()=>{if(!cancelled)setMonitorStatus('error');});
     return ()=>{cancelled=true;};
-  },[]);
+  },[requestCycle]);
   const latest=new Map<string,(typeof observations)[number]>();
   const [clock,setClock]=useState(()=>Date.now());
   useEffect(()=>{
@@ -44,8 +46,17 @@ export function Monitoring() {
   const unknown=data.resources.filter(r=>!fresh(r.id)).length;
   const resources=data.resources.filter(r=>matches(query,r.name,r.address,r.provider));
   const expiring=data.resources.filter(r=>r.expires&&Date.parse(r.expires)>=clock&&Date.parse(r.expires)<clock+7*24*60*60*1000);
+  const elapsed=range==='recent' ? 15*60*1000 : 24*60*60*1000;
+  const visibleObservations=observations.filter(observation=>{
+    const age=clock-Date.parse(observation.checkedAt);
+    return age>=-60_000&&age<=elapsed;
+  });
   return <>
-    <Heading title="وضعیت سرویس‌ها" subtitle="مشاهدات زمان‌دار HTTPS فقط برای دامنه‌های مجاز و فعال‌شده در تنظیمات سرور ثبت می‌شوند." />
+    <Heading title="وضعیت سرویس‌ها" subtitle="مشاهدات زمان‌دار HTTPS فقط برای دامنه‌های مجاز و فعال‌شده در تنظیمات سرور ثبت می‌شوند.">
+      <Button icon={RefreshCw} disabled={monitorStatus==='loading'} onClick={()=>{setMonitorStatus('loading');setRequestCycle(cycle=>cycle+1);}}>
+        {monitorStatus==='error'?'تلاش دوباره':'تازه‌کردن مشاهدات'}
+      </Button>
+    </Heading>
     <div className="stack">
       <Callout><strong>وضعیت اتصال: {monitorStatus==='configured'?'Worker پیکربندی شده':monitorStatus==='loading'?'در حال دریافت':monitorStatus==='error'?'خطای دریافت':'غیرفعال'}.</strong> سلامت فقط برای مشاهدات معتبر ۱۵ دقیقه اخیر گزارش می‌شود. پایش نیازمند اجرای زمان‌بندی‌شده Worker است؛ بررسی دائمی خودکار هنوز فعال نیست.</Callout>
       <Metrics entries={[
@@ -64,13 +75,16 @@ export function Monitoring() {
             </Pill>}/>;
         }):<Empty title="هنوز منبعی ثبت نشده است"/>}
       </Panel>
-      <Panel title="آخرین مشاهدات HTTPS">{observations.length?
-        <div className="stack">{observations.slice(0,12).map((o,index)=><Row key={`${o.resourceId}-${o.checkedAt}-${index}`} icon={Activity}
+      <Panel title="آخرین مشاهدات HTTPS" action={<Filter label="بازهٔ مشاهدات HTTPS" value={range} onChange={setRange}
+        options={[{value:'day',label:'۲۴ ساعت گذشته'},{value:'recent',label:'۱۵ دقیقهٔ گذشته'}]}/>}>{visibleObservations.length?
+        <div className="stack">{visibleObservations.slice(0,12).map((o,index)=><Row key={`${o.resourceId}-${o.checkedAt}-${index}`} icon={Activity}
           title={data.resources.find(r=>r.id===o.resourceId)?.name??'منبع'}
           meta={<>{dateLabel(o.checkedAt,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · کد {o.statusCode??'نامشخص'} · {o.latencyMs??'—'} ms
             {o.tlsExpiresAt?' · انقضای TLS '+dateLabel(o.tlsExpiresAt):''}</>}
-          end={<Pill tone={o.state==='healthy'?'good':'warn'}>{stateLabel(o.state)}</Pill>}/>)}</div>:
-        <Empty title="هنوز مشاهده‌ای ثبت نشده" detail="در صورت فعال‌سازی میزبان‌های مجاز و اجرای Worker، نتایج HTTPS در اینجا نمایش داده می‌شوند."/>}</Panel>
+          end={<Pill tone={o.state==='healthy'&&fresh(o.resourceId)?.checkedAt===o.checkedAt?'good':'warn'}>{stateLabel(
+            clock-Date.parse(o.checkedAt)>15*60*1000 ? 'stale' : o.state,
+          )}</Pill>}/>)}</div>:
+        <Empty title="در این بازه مشاهده‌ای ثبت نشده است"/>}</Panel>
       <Panel title="آخرین گزارش‌های عامل میزبان">
         {machine.length?machine.slice(0,10).map(o=><Row key={o.resourceId+o.checkedAt} icon={Activity}
           title={data.resources.find(r=>r.id===o.resourceId)?.name??'منبع'}

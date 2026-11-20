@@ -1,4 +1,20 @@
-import { test, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { defaultData } from '../src/lib/fixtures';
+import { setupToken, test } from './isolated-app';
+
+test.beforeEach(async ({page,origin})=>{
+  const session=await page.request.post('/api/auth/setup',{headers:origin,data:{
+    setupToken,email:'workflows-owner@example.test',password:'synthetic-workflows-suite-only',
+    displayName:'Workflow QA',workspace:'Workflow QA',
+  }});
+  expect(session.status()).toBe(200);
+  const kinds=['projects','tasks','resources','reminders','incidents','expenses','docs'] as const;
+  const seeded=await page.request.patch('/api/records',{headers:origin,data:{version:0,
+    changes:kinds.flatMap(kind=>defaultData[kind].map(record=>({kind,id:record.id,action:'create',
+      record:kind==='resources'?{...record,linkedProjectIds:[]}:record}))),
+  }});
+  expect(seeded.status(),await seeded.text()).toBe(200);
+});
 
 test('global search, keyboard dialog, no-results, and nested navigation', async ({ page }) => {
   await page.goto('/dashboard');
@@ -38,7 +54,7 @@ test('mobile drawer and fixed navigation', async ({ page }) => {
   await page.getByRole('dialog').getByRole('link',{name:'تقویم'}).click();
   await expect(page).toHaveURL('/calendar');
   await page.getByRole('button',{name:'اعلان‌ها',exact:true}).click();
-  await expect(page.getByRole('dialog',{name:'اعلان‌های نمونه'})).toBeVisible();
+  await expect(page.getByRole('dialog',{name:'اعلان‌های ثبت‌شده'})).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'حساب کاربری'}).click();
   await page.getByRole('dialog').getByRole('link',{name:'تنظیمات حساب'}).click();
@@ -98,7 +114,9 @@ test('task creation, status mutation, list filters, checklist and comments', asy
   await page.getByRole('link',{name:'ProjectOS',exact:true}).click();
   await page.getByRole('link',{name:/رفع ناسازگاری رابط رزرو/}).click();
   const checklist = page.getByLabel('بازبینی انتخاب ساعت در موبایل');
-  await checklist.check();
+  await checklist.click();
+  await expect(checklist).toBeChecked();
+  await page.reload();
   await expect(checklist).toBeChecked();
   await expect(page.getByRole('link',{name:/بهبود متن‌های راهنما/})).toBeVisible();
 });
@@ -122,9 +140,10 @@ test('inventory validates sample addresses, creates server, and opens a domain',
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('نام منبع').fill('Review VPS');
   await dialog.getByLabel('پروژه',{exact:true}).selectOption('novaguard');
-  await dialog.getByLabel('آدرس',{exact:true}).fill('10.0.0.1');
+  await dialog.getByLabel('ارائه‌دهنده').fill('Synthetic host');
+  await dialog.getByLabel('آدرس',{exact:true}).fill('bad address');
   await dialog.getByRole('button',{name:'ثبت مشخصات'}).click();
-  await expect(dialog.getByRole('alert')).toContainText('آدرس مستندسازی');
+  await expect(dialog.getByRole('alert')).toContainText('معتبر');
   await dialog.getByLabel('آدرس',{exact:true}).fill('198.51.100.62');
   await dialog.getByRole('button',{name:'ثبت مشخصات'}).click();
   await expect(page).toHaveURL(/\/infrastructure\/servers\/resource-/);
@@ -142,14 +161,20 @@ test('vault creates only reference metadata and discloses unconnected access', a
   await dialog.getByLabel('محل خزانه').fill('Vault / Staging');
   await dialog.getByRole('button',{name:'ثبت ارجاع'}).click();
   await page.getByRole('button',{name:'نمونه ارجاع تیم'}).click();
-  await expect(dialog.getByText('متصل نیست',{exact:true})).toBeVisible();
+  await expect(dialog.getByText('اتصال تنظیم نشده',{exact:true})).toBeVisible();
+  const {data}=await (await page.request.get('/api/state')).json();
+  expect(data.secrets).toEqual([expect.objectContaining({name:'نمونه ارجاع تیم',vaultProvider:'Vault / Staging'})]);
 });
 
 test('calendar navigation and a reminder on the selected day', async ({ page }) => {
   await page.goto('/calendar');
+  const month=page.locator('.calendar-grid').locator('..').getByRole('heading');
+  const current=await month.textContent();
   await page.getByRole('button',{name:'ماه بعد'}).click();
-  await expect(page.getByRole('heading',{name:/آذر/})).toBeVisible();
+  await expect(month).not.toHaveText(current!);
   await page.getByRole('button',{name:'ماه قبل'}).click();
+  await expect(month).toHaveText(current!);
+  await page.getByRole('button',{name:'امروز',exact:true}).click();
   await page.getByRole('button',{name:'هفته',exact:true}).click();
   await page.getByRole('button',{name:'رویداد جدید'}).click();
   const dialog = page.getByRole('dialog');
@@ -160,21 +185,31 @@ test('calendar navigation and a reminder on the selected day', async ({ page }) 
 });
 
 test('monitoring range, empty state, error and retry', async ({ page }) => {
+  let calls=0;
+  const ago=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
+  await page.route('**/api/monitoring',async route=>{
+    calls++;
+    if(calls===1) {await route.fulfill({status:503,json:{error:'fixture unavailable'}});return;}
+    const checkedAt=ago(calls===2?120:2);
+    await route.fulfill({json:{status:'configured',observations:[
+      {resourceId:'nova-domain',checkedAt,state:'healthy',statusCode:200,latencyMs:27,tlsExpiresAt:null},
+    ],machineObservations:[]}});
+  });
   await page.goto('/monitoring');
-  const currentPath = await page.locator('.trend path').last().getAttribute('d');
-  await page.getByLabel('بازه پایش').selectOption({label:'۲۴ ساعت'});
-  await expect(page.locator('.trend path').last()).not.toHaveAttribute('d',currentPath!);
-  await page.getByLabel('سناریوی پایش').selectOption('empty');
-  await expect(page.getByText('برای این نما داده‌ای وجود ندارد')).toBeVisible();
-  await page.getByLabel('سناریوی پایش').selectOption('error');
+  await expect(page.getByText(/خطای دریافت/)).toBeVisible();
   await page.getByRole('button',{name:'تلاش دوباره'}).click();
-  await expect(page.getByText('در حال بارگذاری دادهٔ نمونه…')).toBeVisible();
-  await expect(page.getByRole('img',{name:/روند مصنوعی/})).toBeVisible();
+  await expect(page.getByText('مشاهدهٔ قدیمی',{exact:true})).toBeVisible();
+  await page.getByLabel('بازهٔ مشاهدات HTTPS').selectOption('recent');
+  await expect(page.getByText('در این بازه مشاهده‌ای ثبت نشده است')).toBeVisible();
+  await page.getByRole('button',{name:'تازه‌کردن مشاهدات'}).click();
+  await expect(page.getByText('HTTPS پاسخ‌گو',{exact:true})).toBeVisible();
+  expect(calls).toBe(3);
 });
 
 test('alert snooze, filter and acknowledge', async ({ page }) => {
   await page.goto('/alerts');
   const title = 'تاریخ تمدید سرور ثبت نشده';
+  await page.getByLabel('وضعیت هشدار').selectOption('open');
   await page.getByRole('button',{name:new RegExp(title)}).click();
   await page.getByRole('button',{name:'تعویق ۲۴ ساعته'}).click();
   await expect(page.getByRole('button',{name:new RegExp(title)})).toHaveCount(0);
@@ -192,7 +227,7 @@ test('expense create, filter by category and dates, report download', async ({ p
   await dialog.getByLabel('شرح هزینه').fill('اشتراک نمونه تیم');
   await dialog.getByLabel('پروژه',{exact:true}).selectOption('mokmok');
   await dialog.getByLabel('دسته‌بندی').selectOption({label:'اشتراک'});
-  await dialog.getByLabel('مبلغ نمونه (تومان)').fill('125000');
+  await dialog.getByLabel('مبلغ',{exact:true}).fill('125000');
   await dialog.getByLabel('تاریخ (میلادی)').fill('2026-01-15');
   await dialog.getByRole('button',{name:'ذخیره هزینه'}).click();
   await page.getByLabel('دسته‌بندی هزینه').selectOption({label:'اشتراک'});
@@ -211,15 +246,17 @@ test('document navigation, editing, search and assistant fixture sources', async
   await expect(page.getByRole('heading',{name:'قواعد موتور تطبیق بودجه'})).toBeVisible();
   await page.getByRole('button',{name:'ویرایش سند',exact:true}).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('متن نمونه و غیرحساس').fill('یادداشت آزمایش سند <b>متن ساده</b>');
+  await dialog.getByLabel('متن سند (بدون رمز و توکن)').fill('یادداشت آزمایش سند <b>متن ساده</b>');
   await dialog.getByRole('button',{name:'ذخیره سند'}).click();
   await expect(page.locator('.document-body')).toHaveText('یادداشت آزمایش سند <b>متن ساده</b>');
   await page.getByRole('searchbox').fill('فاقد-نتیجه');
   await expect(page.getByText('سندی با این جست‌وجو پیدا نشد')).toBeVisible();
-  await page.getByRole('navigation',{name:'منوی اصلی'}).getByRole('link',{name:'دستیار نمایشی'}).click();
-  await page.getByRole('button',{name:'گفت‌وگوی جدید'}).click();
-  await page.getByRole('button',{name:/در MOKMOK چه تصمیمی/}).click();
-  await page.getByRole('link',{name:'قواعد تطبیق بودجه'}).click();
+  await page.getByRole('navigation',{name:'منوی اصلی'}).getByRole('link',{name:'دستیار پروژه'}).click();
+  await page.getByRole('button',{name:'گفتگوی جدید'}).click();
+  await page.getByLabel('پروژهٔ جست‌وجو').selectOption('mokmok');
+  await page.getByLabel('جست‌وجو در دانش').fill('تطبیق بودجه');
+  await page.getByRole('button',{name:'جست‌وجو',exact:true}).click();
+  await page.getByRole('link',{name:/قواعد موتور تطبیق بودجه/}).click();
   await expect(page).toHaveURL('/docs?doc=mok-pricing');
   await expect(page.locator('.document-body')).toContainText('یادداشت آزمایش سند');
 });
@@ -234,21 +271,27 @@ test('activity records an event and links the optional task through shared state
   await page.getByLabel('منبع رویداد').selectOption({label:'ثبت دستی'});
   await expect(page.locator('.timeline')).toContainText('مرور رخداد نمونه');
   await page.getByRole('navigation',{name:'منوی اصلی'}).getByRole('link',{name:'مدیریت وظایف'}).click();
-  await expect(page.getByRole('link',{name:/مرور رخداد نمونه/})).toBeVisible();
+  await page.getByRole('searchbox',{name:'جست‌وجوی وظیفه'}).fill('مرور رخداد نمونه');
+  const followUp=page.getByRole('link',{name:/مرور رخداد نمونه/});
+  await expect(followUp).toBeVisible();
+  await followUp.click();
+  await expect(page.getByRole('heading',{name:'مرور رخداد نمونه',level:1})).toBeVisible();
+  await expect(page.getByText('نیاز به بازبینی در پروژه',{exact:true})).toBeVisible();
 });
 
 test('team invite, integration disclosure and persisted UI preferences', async ({ page }) => {
   await page.goto('/team');
-  await page.getByRole('button',{name:'دعوت کاربر'}).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('نام نمایشی').fill('همکار آزمایشی');
-  await dialog.getByLabel('ایمیل نمونه').fill('teammate@example.com');
-  await dialog.getByRole('button',{name:'ثبت دعوت نمونه'}).click();
-  await expect(page.getByRole('table').getByText('teammate@example.com')).toBeVisible();
+  await page.getByLabel('ایمیل عضو جدید').fill('teammate@example.test');
+  await page.getByLabel('پروژه‌های مجاز').selectOption('gym');
+  await page.getByRole('button',{name:'ایجاد کد دعوت یک‌بارمصرف'}).click();
+  await expect(page.getByText('teammate@example.test',{exact:true})).toBeVisible();
+  await expect(page.getByRole('table').getByText('teammate@example.test')).toHaveCount(0);
   const nav = page.getByRole('navigation',{name:'منوی اصلی'});
   await nav.getByRole('link',{name:'اتصال سرویس‌ها'}).click();
   await page.getByRole('button',{name:'جزئیات اتصال'}).first().click();
-  await expect(dialog.getByRole('button',{name:'برقراری اتصال'})).toBeDisabled();
+  await expect(dialog.getByText('مخزن‌ها و دسترسی خواندنی GitHub روی سرور تنظیم می‌شوند.')).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'برقراری اتصال'})).toHaveCount(0);
   await page.keyboard.press('Escape');
   await nav.getByRole('link',{name:'تنظیمات',exact:true}).click();
   await page.getByLabel('نام فضای کاری').fill('فضای آزمون');
@@ -260,5 +303,6 @@ test('team invite, integration disclosure and persisted UI preferences', async (
   await expect(page.getByLabel('نام فضای کاری')).toHaveValue('فضای آزمون');
   await expect(page.locator('html')).toHaveAttribute('data-theme','dim');
   await nav.getByRole('link',{name:'کاربران و دسترسی‌ها'}).click();
-  await expect(page.getByText('teammate@example.com')).toHaveCount(0);
+  await expect(page.getByText('teammate@example.test',{exact:true})).toBeVisible();
+  await expect(page.getByRole('table').getByText('teammate@example.test')).toHaveCount(0);
 });
