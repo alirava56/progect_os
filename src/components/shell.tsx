@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   Activity, Bell, CalendarDays, ChartNoAxesCombined, ChevronDown, ChevronLeft, Clock3, FileText,
   FolderKanban, Layers2, LayoutDashboard, ListTodo, LogOut, Menu, Plus, Plug2, ReceiptText, Search,
@@ -29,7 +29,7 @@ const groups = [
   ]},
   { label:'مدیریت و دانش', links:[
     { path:'/docs', label:'مستندات و ویکی', Icon:FileText },
-    { path:'/assistant', label:'دستیار (غیرفعال)', Icon:Sparkles },
+    { path:'/assistant', label:'دستیار پروژه', Icon:Sparkles },
     { path:'/finance', label:'هزینه‌ها و قراردادها', Icon:ReceiptText },
     { path:'/reports', label:'گزارش‌ها و تحلیل', Icon:ChartNoAxesCombined },
   ]},
@@ -43,11 +43,14 @@ const groups = [
 const links = groups.flatMap(group => group.links);
 type Overlay = 'search' | 'nav' | 'account' | 'notifications' | 'quick' | 'projects' | 'project' | 'task' | 'resource' | 'reminder';
 const isActive = (path: string, current: string) => current === path || current.startsWith(path + '/');
+const subscribeToHydration = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 export function Mark({ className = '' }: { className?: string }) {
   return <span className={`brand-mark ${className}`} aria-hidden="true"><Layers2 /></span>;
 }
 export function Brand() {
-  return <Link className="brand" href="/dashboard">
+  return <Link className="brand" href="/dashboard" prefetch={false}>
     <Mark /><span dir="ltr"><strong>Project<span>OS</span></strong><small>Developer Command Center</small></span>
   </Link>;
 }
@@ -57,7 +60,7 @@ function Navigation({ current, onNavigate }: { current: string; onNavigate?: () 
   const alerts = data.incidents.filter(a => a.state === 'open').length;
   return <nav className="side-nav" aria-label="منوی اصلی">{groups.map(group => <div className="nav-group" key={group.label}>
     <div>{group.label}</div>
-    {group.links.map(({ path, label, Icon }) => <Link key={path} onClick={onNavigate} href={path}
+    {group.links.map(({ path, label, Icon }) => <Link key={path} onClick={onNavigate} href={path} prefetch={false}
       className={`nav-link ${isActive(path, current) ? 'is-active' : ''}`} aria-current={isActive(path, current) ? 'page' : undefined}>
       <Icon aria-hidden="true" /><span>{label}</span>{path === '/alerts' && alerts > 0 && <small>{number(alerts)}</small>}
     </Link>)}
@@ -84,6 +87,7 @@ function GlobalSearch({ close }: { close: () => void }) {
 export function Shell({ children }: { children: ReactNode }) {
   const current = usePathname();
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const interactive = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
   const { data, projectScope, setProjectScope, saving, syncError, notice } = useDemo();
   const parent = links.find(link => isActive(link.path, current));
   const project = data.projects.find(p => p.id === projectScope);
@@ -107,34 +111,34 @@ export function Shell({ children }: { children: ReactNode }) {
     <a href="#page-content" className="skip-link">رفتن به محتوای صفحه</a>
     <aside className="sidebar"><Brand /><Navigation current={current} />
       <div className="workspace-footer">
-        <button className="workspace-switch" type="button" onClick={() => setOverlay('projects')} aria-haspopup="dialog">
+        <button className="workspace-switch" type="button" disabled={!interactive} onClick={() => setOverlay('projects')} aria-haspopup="dialog">
           <span className="avatar"><PanelTopOpen size={16} aria-hidden="true" /></span><span className="row-copy"><strong>{project?.name ?? data.preferences.workspace}</strong><small>جابه‌جایی بین پروژه‌ها</small></span><ChevronDown size={14} aria-hidden="true" />
         </button>
       </div>
     </aside>
     <div className="workspace-main">
       <header className="topbar">
-        <div className="top-start"><IconButton className="mobile-menu" icon={Menu} label="منوی اصلی" onClick={() => setOverlay('nav')} />
+        <div className="top-start"><IconButton className="mobile-menu" icon={Menu} label="منوی اصلی" disabled={!interactive} onClick={() => setOverlay('nav')} />
           <nav aria-label="مسیر صفحه" className="breadcrumb">
-            <Link className="crumb-brand" href="/dashboard" dir="ltr">ProjectOS</Link><ChevronLeft size={13} aria-hidden="true" />
-            {crumb && parent ? <><Link href={parent.path}>{parent.label}</Link><ChevronLeft size={13} aria-hidden="true" /><span aria-current="page">{crumb}</span></> :
+            <Link className="crumb-brand" href="/dashboard" dir="ltr" prefetch={false}>ProjectOS</Link><ChevronLeft size={13} aria-hidden="true" />
+            {crumb && parent ? <><Link href={parent.path} prefetch={false}>{parent.label}</Link><ChevronLeft size={13} aria-hidden="true" /><span aria-current="page">{crumb}</span></> :
               <span aria-current="page">{parent?.label ?? 'راه‌اندازی'}</span>}
           </nav>
         </div>
         <div className="top-tools">
-          <button className="top-search" type="button" onClick={() => setOverlay('search')} title="جست‌وجوی فضای کاری">
+          <button className="top-search" type="button" disabled={!interactive} onClick={() => setOverlay('search')} title="جست‌وجوی فضای کاری">
             <Search size={16} aria-hidden="true" /><span>جست‌وجوی فضای کاری</span><kbd dir="ltr" aria-hidden="true">Ctrl K</kbd>
           </button>
-          <IconButton icon={Plus} label="افزودن سریع" onClick={() => setOverlay('quick')} />
-          <IconButton icon={Bell} className={openAlerts.length ? 'has-alerts' : ''} label="اعلان‌ها" onClick={() => setOverlay('notifications')} />
-          <button className="avatar avatar-button" aria-label="حساب کاربری" type="button" onClick={() => setOverlay('account')}><span dir="ltr">A</span></button>
+          <IconButton icon={Plus} label="افزودن سریع" disabled={!interactive} onClick={() => setOverlay('quick')} />
+          <IconButton icon={Bell} className={openAlerts.length ? 'has-alerts' : ''} label="اعلان‌ها" disabled={!interactive} onClick={() => setOverlay('notifications')} />
+          <button className="avatar avatar-button" aria-label="حساب کاربری" type="button" disabled={!interactive} onClick={() => setOverlay('account')}><span dir="ltr">A</span></button>
         </div>
       </header>
       <main className="page-content" id="page-content" tabIndex={-1} key={current}>{children}
         <footer className="page-footer"><i />نسخه خصوصی توسعه<span>·</span> {syncError ? 'خطا در ذخیره‌سازی' : saving ? 'در حال ذخیره' : 'اطلاعات در فضای کاری ذخیره می‌شوند'}</footer>
       </main>
     </div>
-    <nav className="mobile-nav" aria-label="دسترسی سریع">{links.filter(link => link.short).map(({ path, Icon, short }) => <Link key={path} className={isActive(path, current) ? 'is-active' : ''} aria-current={isActive(path,current) ? 'page' : undefined} href={path}><Icon aria-hidden="true" /><span>{short}</span></Link>)}</nav>
+    <nav className="mobile-nav" aria-label="دسترسی سریع">{links.filter(link => link.short).map(({ path, Icon, short }) => <Link key={path} className={isActive(path, current) ? 'is-active' : ''} aria-current={isActive(path,current) ? 'page' : undefined} href={path} prefetch={false}><Icon aria-hidden="true" /><span>{short}</span></Link>)}</nav>
 
     {overlay === 'nav' && <Modal title="فضای کاری" onClose={close} align="drawer"><Navigation current={current} onNavigate={close} /><div className="modal-footer"><button type="button" className="button button-soft" onClick={() => setOverlay('projects')}>جابه‌جایی بین پروژه‌ها</button></div></Modal>}
     {overlay === 'search' && <GlobalSearch close={close} />}

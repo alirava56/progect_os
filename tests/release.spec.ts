@@ -392,3 +392,21 @@ test('owners can attach Vault metadata to a VPS and other roles cannot retrieve 
     expect((await (await member.get('/api/state')).json()).data.secrets).toEqual([]);
   } finally { await member.dispose(); }
 });
+
+test('workspace overlay triggers become available when browser scripts are ready', async ({page, origin}) => {
+  await bootstrap(page.request, origin);
+  let releaseScripts!: () => void;
+  const ready = new Promise<void>(resolve => { releaseScripts = resolve; });
+  await page.route(/\/_next\/static\/.*\.js(?:\?.*)?$/, async route => {
+    await ready;
+    await route.continue();
+  });
+  const account = page.getByRole('button', {name:'حساب کاربری', exact:true});
+  try {
+    await page.goto('/dashboard', {waitUntil:'commit'});
+    await expect(account).toBeDisabled();
+  } finally { releaseScripts(); }
+  await expect(account).toBeEnabled();
+  await account.click();
+  await expect(page.getByRole('dialog', {name:'حساب کاربری'})).toBeVisible();
+});

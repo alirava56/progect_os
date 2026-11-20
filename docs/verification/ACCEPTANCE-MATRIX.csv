@@ -1,8 +1,9 @@
 ID,requirement,priority,implementation,test,evidence,status,blocker
 A01,Windows clean install types lint core build,P0,package lock and bundled pg,local npm commands,evidence-2026-11-19,VERIFIED_LOCAL,
 A02,Production build Playwright and isolated database,P0,isolated-app fixture,original nine plus release cases,evidence-2026-11-19,VERIFIED_LOCAL,
-A03,Linux Windows hosted checks and CodeQL,P0,.github/workflows/ci.yml,hosted workflow,FINAL-DELIVERY-REPORT-FA.md,BLOCKED_EXTERNAL,Hosted repository and runner
-A04,Historical demo test suite parity,P1,responsive and workflows retained,legacy diagnostic,FINAL-DELIVERY-REPORT-FA.md,FAIL,Historical fixtures and demo login incompatible with current authentication
+A03,Linux Windows hosted checks and CodeQL,P0,.github/workflows/ci.yml,GitHub Actions,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_HOSTED,
+A04,Historical test suite parity,P1,real login and isolated seeded workspace,6 responsive and onboarding checks,FINAL-DELIVERY-REPORT-FA.md,PARTIAL,13 workflows need current fixtures and assertions
+A05,Project infrastructure persistence after application restart,P0,project detail forms and PostgreSQL runtime,test:project-lifecycle,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 B01,PostgreSQL runtime and SQLite import,P0,sql repository migrations import,test:postgres and test:postgres-http,evidence-2026-11-19,VERIFIED_LOCAL,
 B02,Scoped permission MFA and record concurrency,P0,project grants record versions sessions,core and HTTP negative tests,evidence-2026-11-19,VERIFIED_LOCAL,
 B03,Fully normalized target and environment privilege review,P0,record rows with project FKs,design review,ADR-002-postgres-runtime.md,OPEN,Normalized domain extensions and actual service roles
@@ -10,6 +11,7 @@ C01,Recurring reminder and crash recovery,P0,scheduler and delivery lease,core r
 C02,Vault provider and real opted-in messaging,P0,KV metadata and Telegram Resend,adapter and queue tests,INTEGRATIONS-FA.md,BLOCKED_EXTERNAL,Staging Vault and delivery accounts
 C03,Encrypted backup and independent restore,P0,encrypted postgres archive,test:postgres,evidence-2026-11-19,VERIFIED_LOCAL,
 C04,Offsite retention and RPO RTO,P0,operator runbook,staging disaster recovery,FINAL-DELIVERY-REPORT-FA.md,BLOCKED_EXTERNAL,Approved offsite and staging environment
+C05,Project-scoped resource references for Vault,P1,inventory link and owner-only metadata,HTTP authorization and restore regression,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,
 D01,HTTPS machine observations GitHub and memory,P1,metadata routes scoped inputs,mock and HTTP boundaries,FINAL-DELIVERY-REPORT-FA.md,VERIFIED_LOCAL,Provider behavior not certified
 D02,Provider validation for integrations,P1,project bindings and opt-ins,staging integrations,INTEGRATIONS-FA.md,BLOCKED_EXTERNAL,GitHub AI and monitoring staging accounts
 D03,Exact mixed currency accounting,P1,explicit minor units and grouped BigInt totals,core money tests,core.test.cjs,PARTIAL,Invoice payment ledger allocations and sourced FX
