@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   let accepted = 0;
   for (const binding of matches) {
     accepted += await transaction(async db => {
-      await db.scopeWorkspace?.(binding.workspaceId);
+      await db.scopeWorkspace?.(binding.workspaceId,{role:'github',projects:[binding.projectId]});
       if (!await storedRecord(db, binding.workspaceId, 'projects', binding.projectId)) return 0;
       const at = new Date().toISOString();
       const inserted = await db.run(`INSERT INTO github_deliveries(workspace_id,project_id,repo,delivery_id,payload_hash,event_type,received_at)

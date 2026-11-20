@@ -183,6 +183,9 @@ export async function verifyRollbackBoundary(pool, expected) {
 
 export async function importSnapshot(pool, snapshot, expected, beforeCommit = async () => {}) {
   const client = await pool.connect();
+  let discard = false;
+  function onConnectionError() { discard = true; }
+  client.on('error', onConnectionError);
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(3804522)');
@@ -210,10 +213,11 @@ export async function importSnapshot(pool, snapshot, expected, beforeCommit = as
     await client.query('COMMIT');
     return { ...expected, status: 'imported' };
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (!discard) discard = await client.query('ROLLBACK').then(() => false, () => true);
     throw error;
   } finally {
-    client.release();
+    client.removeListener('error', onConnectionError);
+    client.release(discard);
   }
 }
 

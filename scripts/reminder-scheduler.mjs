@@ -120,7 +120,12 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
       const current = await lockWorkspace(db, workspace);
       if (!current) return;
       const version = current.version + 1;
-      const parsed = (await db.all('SELECT id,kind,payload FROM records WHERE workspace_id=?', workspace))
+      const rows = await db.all(`SELECT id,kind,payload FROM records WHERE workspace_id=?
+        AND kind IN ('reminders','tasks','charges','resources','contracts','preferences','incidents','secrets')`, workspace);
+      if (db.dialect === 'postgres' && (await db.one('SELECT public.projectos_reminder_workspace() AS scope'))?.scope === workspace) {
+        rows.push(...await db.all("SELECT id,'secrets' AS kind,payload FROM public.projectos_rotation_deadlines()"));
+      }
+      const parsed = rows
         .map(row => ({...row, value:JSON.parse(row.payload)}));
       const currentIncidents = parsed.filter(row => row.kind === 'incidents');
       const incidents = new Map(currentIncidents.map(row => [row.id, row.value]));

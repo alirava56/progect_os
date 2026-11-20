@@ -38,6 +38,15 @@ psql "service=projectos_staging_migrator" -X -v delivery_role=projectos_delivery
 
 در Restore روی کلاستر تازه، نقش‌های ارجاع‌شده در Policyها را پیش از Restore با همان نام ایجاد کنید. GRANTها در آرشیو ثبت نمی‌شوند. پیش از اجرای مجدد Worker همان فرمان را با Workspace تأییدشده دوباره اجرا کنید.
 
+برای HTTPS و زمان‌بند هم برای هر Workspace یک حساب اختصاصی بسازید و از اتصال مالک schema فرمان مربوط را اجرا کنید.
+
+```shell
+psql "service=projectos_staging_migrator" -X -v monitor_role=projectos_monitor_alpha -v workspace_id=alpha -f schema/postgres/grant-monitor.sql
+psql "service=projectos_staging_migrator" -X -v reminder_role=projectos_reminder_alpha -v workspace_id=alpha -f schema/postgres/grant-reminder.sql
+```
+
+هر فرایند `npm run monitors` و `npm run reminders` به Connection String حساب خودش نیاز دارد. حساب پایش فقط Workspace ثبت‌شده را پوشش می‌دهد و محدودیت میزبان HTTPS در تنظیمات فرایند بررسی می‌شود. زمان‌بند برای موعد چرخش صرفاً شناسه، پروژه و تاریخ را از تابع PostgreSQL دریافت می‌کند. برای چند Workspace، نمونهٔ فرایند و حساب را جداگانه تنظیم کنید. دادهٔ ثبت نقش‌ها در Backup نیست و بعد از Restore دوباره Provision می‌شود.
+
 حساب وب اجازهٔ تغییر رکوردهای عملیاتی و افزودن رویداد ممیزی و نسخهٔ سند را دارد. نگهداری و پاک‌سازی دوره‌ای، Worker و Backup با حساب‌های جداگانه اجرا می‌شوند. اسکریپت برای نقش تازه طراحی شده است و مجوزهای مستقیم قبلی یا مجوزهای عمومی سفارشی محیط را بازنشانی نمی‌کند. نتیجهٔ تفکیک نقش روی Staging باید با حساب واقعی همان محیط بررسی شود.
 
 تست‌های CI، SCA و CodeQL، مجوزهای نقش واقعی PostgreSQL، Migration، بازیابی از صفر، رصد زمان‌بندی، عملکرد و دسترس‌پذیری را در محیط هدف اجرا کنید. قطع نگه‌داشتن نوشتن تا پایان Smoke، امکان بازگشت به ورودی SQLite را حفظ می‌کند. اطلاعات پایدار آمادهٔ بهره‌برداری نیازمند Backup مستقل و تمرین بازیابی است. [راهنمای Migration](../migrations/SQLITE-TO-POSTGRES-FA.md)

@@ -24,7 +24,7 @@ function validateChange(input: unknown): RecordChange {
 function key(kind: RecordKind, id: string) { return kind + ':' + id; }
 function decode(row: RecordRow): WorkspaceRecord { return JSON.parse(row.payload) as WorkspaceRecord; }
 
-async function validateRelations(db: SqlExecutor, workspaceId: string, changes: Map<string, PreparedChange>) {
+async function validateRelations(db: SqlExecutor, workspaceId: string, changes: Map<string, PreparedChange>, checkTaskGraph: boolean) {
   const exists = async (kind: RecordKind, id: string) => {
     const draft = changes.get(key(kind, id));
     return draft ? Boolean(draft.record) : Boolean(await storedRecord(db, workspaceId, kind, id));
@@ -60,7 +60,7 @@ async function validateRelations(db: SqlExecutor, workspaceId: string, changes: 
     }
     return effective;
   }
-  if (updates.some(change => change.kind === 'tasks')) {
+  if (checkTaskGraph && updates.some(change => change.kind === 'tasks')) {
     const tasks = await graphRows('tasks');
     validateGraph(new Map([...tasks].map(([id, task]) => [id, task.dependencies])), 'task dependencies');
   }
@@ -109,6 +109,8 @@ export async function commitRecordChanges(
     const workspace = await lockWorkspace(db, account.workspaceId);
     if (!workspace) throw new ForbiddenError();
     const policy = await projectPolicy(db, account);
+    const privateTaskGraph = db.dialect==='postgres' && account.role==='editor' && policy.projectIds!==null
+      && Boolean(process.env.PROJECTOS_DB_SCOPE_KEY);
     if (expectedVersion > workspace.version || (strictWorkspaceVersion && workspace.version !== expectedVersion)) {
       throw new VersionConflictError();
     }
@@ -144,19 +146,27 @@ export async function commitRecordChanges(
         const hidden: string[] = [];
         for (const id of old?.dependencies ?? []) {
           const row = await storedRecord(db, account.workspaceId, 'tasks', id);
-          if (row && !canSeeProject(policy, row.project_id)) hidden.push(id);
+          if ((privateTaskGraph && !row) || (row && !canSeeProject(policy, row.project_id))) hidden.push(id);
         }
         for (const id of task.dependencies) {
           const row = await storedRecord(db, account.workspaceId, 'tasks', id);
-          if (row && !canSeeProject(policy, row.project_id)) throw new ValidationError('Invalid task dependency');
+          if ((row && !canSeeProject(policy, row.project_id)) || (privateTaskGraph && !row
+            && !changes.some(change=>change.kind==='tasks' && change.id===id && change.action==='create'))) {
+            throw new ValidationError('Invalid task dependency');
+          }
         }
         task.dependencies = [...task.dependencies, ...hidden];
       }
       prepared.set(keyForRecord, { kind, id, previous, record });
     }
-    await validateRelations(db, account.workspaceId, prepared);
+    await validateRelations(db, account.workspaceId, prepared, !privateTaskGraph);
     const version = workspace.version + 1;
     await persistChanges(db, account, version, [...prepared.values()], settings);
+    const tasks=[...prepared.values()].filter(change=>change.kind==='tasks').map(change=>change.id);
+    if (privateTaskGraph && tasks.length) {
+      const verified=await db.one<{result:string}>('SELECT public.projectos_check_task_graph(?::jsonb) AS result',JSON.stringify(tasks));
+      if (verified?.result!=='valid') throw new ValidationError('Invalid task dependency graph');
+    }
     return version;
   });
 }

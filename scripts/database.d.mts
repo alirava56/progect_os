@@ -3,7 +3,9 @@ import type { DatabaseSync } from 'node:sqlite';
 export type SqlParam = string | number | null;
 export interface SqlExecutor {
   readonly dialect: 'sqlite' | 'postgres';
-  scopeWorkspace?(workspaceId: string, documentScope?: {role:string; projects:string[]|null}): Promise<void>;
+  scopeWorkspace?(workspaceId: string, claims?: {
+    role:'owner'|'editor'|'viewer'|'invitation'|'github'|'agent'; projects:string[]|null; resources?:string[]; actor?:string;
+  }): Promise<void>;
   all<Row>(statement: string, ...params: SqlParam[]): Promise<Row[]>;
   one<Row>(statement: string, ...params: SqlParam[]): Promise<Row | undefined>;
   run(statement: string, ...params: SqlParam[]): Promise<number>;

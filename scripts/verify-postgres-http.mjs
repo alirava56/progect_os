@@ -165,6 +165,35 @@ try {
   assert.equal(visibleHistory.status,200);
   assert.equal((await visibleHistory.json()).versions.length,1);
   assert.equal(hiddenHistory.status,404);
+  const memberEmail='runtime-editor@example.test';
+  const editorInvite=await fetch(appUrl+'/api/team/invitations',{method:'POST',headers,
+    body:JSON.stringify({email:memberEmail,role:'editor',projectIds:[otherProject.id]})});
+  assert.equal(editorInvite.status,200);
+  const editorJoin=await fetch(appUrl+'/api/auth/accept-invite',{method:'POST',
+    headers:{'Content-Type':'application/json',Origin:appUrl,'Sec-Fetch-Site':'same-origin'},
+    body:JSON.stringify({token:(await editorInvite.json()).token,email:memberEmail,password:account.password,displayName:'Fixture editor'})});
+  assert.equal(editorJoin.status,200);
+  const editorHeaders={...headers,Cookie:editorJoin.headers.get('set-cookie').split(';',1)[0]};
+  const commit=async (changes,session=headers)=>{
+    const state=await (await fetch(appUrl+'/api/state',{headers:session})).json();
+    return fetch(appUrl+'/api/records',{headers:session,method:'PATCH',body:JSON.stringify({version:state.version,changes})});
+  };
+  const makeTask=(id,projectId,dependencies=[])=>({id,projectId,title:id,status:'todo',priority:'medium',
+    owner:'',due:'2031-03-01',description:'',checklist:[],comments:[],dependencies});
+  const taskChange=(record,action='create')=>({kind:'tasks',id:record.id,record,action});
+  const privateTask=makeTask('legacy-private-task',project.id);
+  const editorTask=makeTask('legacy-editor-task',otherProject.id,[privateTask.id]);
+  assert.equal((await commit([taskChange(privateTask),taskChange(editorTask)])).status,200);
+  assert.equal((await fetch(appUrl+'/api/records/tasks/'+privateTask.id,{headers:editorHeaders})).status,404);
+  const updatedTask={...editorTask,title:'Updated editor task',dependencies:[]};
+  assert.equal((await commit([taskChange(updatedTask,'replace')],editorHeaders)).status,200);
+  const ownerTask=await (await fetch(appUrl+'/api/records/tasks/'+editorTask.id,{headers})).json();
+  assert.deepEqual(ownerTask.record.dependencies,[privateTask.id]);
+  assert.equal((await commit([taskChange({...updatedTask,dependencies:[privateTask.id]},'replace')],editorHeaders)).status,422);
+  const first=makeTask('cycle-first',otherProject.id,['cycle-second']);
+  const second=makeTask('cycle-second',otherProject.id,['cycle-first']);
+  assert.equal((await commit([taskChange(first),taskChange(second)],editorHeaders)).status,422);
+  assert.equal((await fetch(appUrl+'/api/records/tasks/'+first.id,{headers})).status,404);
   assert.equal((await fetch(endpoint,{headers:viewerHeaders})).status,404);
   const github=appUrl+'/api/integrations/github';
   assert.equal((await fetch(github,{headers:viewerHeaders})).status,403);

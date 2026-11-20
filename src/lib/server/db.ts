@@ -57,12 +57,12 @@ export async function projectPolicy(db: SqlExecutor, account: Account): Promise<
   );
   if (!member || member.role !== account.role) throw new ForbiddenError();
   if (member.role === 'owner' || member.project_ids === null) {
-    await db.scopeWorkspace?.(account.workspaceId,{role:member.role,projects:null});
+    await db.scopeWorkspace?.(account.workspaceId,{role:member.role,projects:null,actor:account.id});
     return { projectIds: null };
   }
   const grants: unknown = JSON.parse(member.project_ids);
   if (!Array.isArray(grants) || grants.some(id => typeof id !== 'string')) throw new ForbiddenError();
-  await db.scopeWorkspace?.(account.workspaceId,{role:member.role,projects:grants});
+  await db.scopeWorkspace?.(account.workspaceId,{role:member.role,projects:grants,actor:account.id});
   return { projectIds: new Set<string>(grants) };
 }
 
@@ -360,8 +360,12 @@ export async function persistChanges(
       }
     }
     if (record && !before && (kind === 'projects' || kind === 'docs')) {
-      const deleted = await db.one(`SELECT id FROM audit_events WHERE workspace_id=? AND kind=? AND record_id=?
-        AND action='delete' LIMIT 1`, workspaceId, kind, id);
+      const usePrivateHistory = db.dialect==='postgres' && kind==='docs' && account.role==='editor'
+        && Boolean(process.env.PROJECTOS_DB_SCOPE_KEY);
+      const deleted = usePrivateHistory
+        ? (await db.one<{retired:boolean}>('SELECT public.projectos_document_was_retired(?) AS retired',id))?.retired
+        : await db.one(`SELECT id FROM audit_events WHERE workspace_id=? AND kind=? AND record_id=?
+          AND action='delete' LIMIT 1`, workspaceId, kind, id);
       if (deleted) throw new VersionConflictError();
     }
     if (record && kind === 'docs') {

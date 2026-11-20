@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     || !Number.isSafeInteger(totalBytes) || totalBytes<1 || usedBytes<0 || usedBytes>totalBytes || !Number.isFinite(stamp)
     || Math.abs(Date.now()-stamp)>120_000 || (!diskOmitted && !diskValid)) return apiError('Invalid observation',422);
   if (!approved.has(resourceId) || !await readTransaction(async db => {
-    await db.scopeWorkspace?.(workspace);
+    await db.scopeWorkspace?.(workspace,{role:'agent',projects:[],resources:[resourceId]});
     return storedRecord(db,workspace,'resources',resourceId);
   })) return apiError('Not found',404);
   const inserted = await sql.run(`INSERT INTO machine_observations(workspace_id,resource_id,checked_at,cpu_percent,used_bytes,total_bytes,disk_used_bytes,disk_total_bytes)
