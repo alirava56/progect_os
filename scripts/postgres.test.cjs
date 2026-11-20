@@ -37,6 +37,8 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
   const suffix = randomBytes(6).toString('hex');
   const target = 'projectos_test_' + suffix;
   const restoreTarget = 'projectos_restore_' + suffix;
+  const runtimeRole = 'projectos_runtime_' + suffix;
+  let runtimeCreated = false;
   const connectionFor = db => new URL('/' + db, url).href;
   const admin = new Client({ connectionString: url.href });
   const area = mkdtempSync(join(tmpdir(), 'projectos-pg-test-'));
@@ -98,6 +100,26 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     process.env.PROJECTOS_RESTORE_URL = connectionFor(restoreTarget);
     assert.match(run('migrate-postgres.mjs'), /Applied 001_initial/);
     assert.doesNotMatch(run('migrate-postgres.mjs'), /Applied/);
+    await admin.query('CREATE ROLE "' + runtimeRole + '" LOGIN');
+    runtimeCreated = true;
+    const psql = process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN, 'psql') : 'psql';
+    const roleArgs = ['-X', '-h', url.hostname, '-p', url.port || '5432', '-U', decodeURIComponent(url.username),
+      '-d', target, '-f', join(__dirname, '../schema/postgres/grant-runtime.sql'), '-v'];
+    const psqlOptions = {encoding:'utf8', env:{...process.env, PGPASSWORD:decodeURIComponent(url.password)}, timeout:30_000};
+    assert.throws(() => execFileSync(psql,[...roleArgs,'runtime_role='+decodeURIComponent(url.username)],psqlOptions),
+      /dedicated unprivileged/);
+    execFileSync(psql,[...roleArgs,'runtime_role='+runtimeRole],psqlOptions);
+    const scoped = new Client({connectionString:connectionFor(target)});
+    try {
+      await scoped.connect();
+      await scoped.query('SET ROLE "' + runtimeRole + '"');
+      await scoped.query('SELECT id FROM records LIMIT 1');
+      await scoped.query('UPDATE records SET record_version=record_version WHERE FALSE');
+      await assert.rejects(scoped.query('DELETE FROM audit_events WHERE FALSE'),{code:'42501'});
+      await assert.rejects(scoped.query('UPDATE document_versions SET revision=revision WHERE FALSE'),{code:'42501'});
+      await assert.rejects(scoped.query('SELECT id FROM projectos_schema_migrations'),{code:'42501'});
+      await assert.rejects(scoped.query('CREATE TABLE public.runtime_forbidden(id integer)'),{code:'42501'});
+    } finally { await scoped.end(); }
 
     const { importSnapshot, manifest, openSnapshot } = await import('./sqlite-import.mjs');
     const source = openSnapshot(sqlitePath);
@@ -247,6 +269,7 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');
+    if (runtimeCreated) await admin.query('DROP ROLE "' + runtimeRole + '"');
     await admin.end();
     rmSync(area, { recursive:true, force:true, maxRetries:5 });
   }

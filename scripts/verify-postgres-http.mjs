@@ -13,10 +13,12 @@ if (!['postgres:', 'postgresql:'].includes(adminUrl.protocol) || !['127.0.0.1','
 
 const database = 'projectos_test_' + randomBytes(6).toString('hex');
 const runtime = new URL('/' + database, adminUrl);
+const runtimeRole = database.replace('projectos_test_', 'projectos_app_');
+const runtimePassword = randomBytes(24).toString('hex');
 const scratch = await mkdtemp(join(tmpdir(),'projectos-pg-http-'));
 const admin = new pg.Client({connectionString:adminUrl.href});
 const setupToken = 'synthetic-runtime-test-bootstrap-token';
-let server, existed = false;
+let server, existed = false, roleCreated = false;
 
 async function startServer(env) {
   server = fork(resolve('scripts/prepare-e2e.mjs'),[],{env,stdio:['ignore','ignore','pipe','ipc']});
@@ -47,6 +49,17 @@ try {
     PROJECTOS_SETUP_TOKEN:setupToken, PROJECTOS_AI_ENABLED:'disabled', PROJECTOS_GITHUB_TOKEN:'',
   };
   execFileSync(process.execPath,[resolve('scripts/migrate-postgres.mjs')],{env,stdio:['ignore','ignore','pipe'],timeout:30_000});
+  await admin.query(`CREATE ROLE "${runtimeRole}" LOGIN PASSWORD '${runtimePassword}'`);
+  roleCreated = true;
+  const psql = process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN, 'psql') : 'psql';
+  execFileSync(psql,['-X','-h',adminUrl.hostname,'-p',adminUrl.port||'5432','-U',decodeURIComponent(adminUrl.username),
+    '-d',database,'-v','runtime_role='+runtimeRole,'-f',resolve('schema/postgres/grant-runtime.sql')],{
+    env:{...env, PGPASSWORD:decodeURIComponent(adminUrl.password)},stdio:['ignore','ignore','pipe'],timeout:30_000,
+  });
+  const appDatabase = new URL(runtime);
+  appDatabase.username = runtimeRole;
+  appDatabase.password = runtimePassword;
+  env.PROJECTOS_DATABASE_URL = appDatabase.href;
   let appUrl = await startServer(env);
   const ready = await fetch(appUrl+'/api/health');
   assert.equal(ready.status,200);
@@ -180,6 +193,7 @@ try {
 } finally {
   await stopServer();
   if (existed) await admin.query('DROP DATABASE "' + database + '"');
+  if (roleCreated) await admin.query('DROP ROLE "' + runtimeRole + '"');
   await admin.end();
   await rm(scratch,{recursive:true,force:true,maxRetries:4});
 }
