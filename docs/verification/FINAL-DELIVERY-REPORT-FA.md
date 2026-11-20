@@ -17,6 +17,7 @@
 | مرور فعالیت و دریافت سابقهٔ GitHub | `IMPLEMENTED_AND_VERIFIED` | مرور Commit، Branch، Pull Request و Issue در صفحهٔ پروژه و نمایش وضعیت قدیمی آزموده شدند. Mock سقف سه صفحه، حذف اقلام تکراری و پالایش پاسخ را بررسی کرد. آزمون HTTP با PostgreSQL خواندن مجاز Viewer و رد همگام‌سازی آن را تأیید کرد. اعتبارسنجی اتصال با حساب بیرونی Staging باز است. |
 | فاکتور، اقساط، ثبت پرداخت و خروجی مالی | `IMPLEMENTED_AND_VERIFIED` | فرم فارسی، ثبت ۱۰۰٫۰۰ دلار در دو قسط، ثبت ۶۰٫۰۰ دلار و ماندهٔ دقیق ۴۰٫۰۰ دلار، رد شناسهٔ تکراری، ابطال فاکتور بدون پرداخت، CSV و محدودیت کاربر خارج از پروژه در Playwright تأیید شدند. Migration 005 و `test:postgres` ثبت هم‌زمان، ارز ناسازگار، اضافه‌پرداخت و جلوگیری از حذف پرداخت را آزمودند. نرخ تبدیل مستند و تطبیق پرداخت با قرارداد همچنان بازند. |
 | ادامهٔ کار پروژه و استناد به رویداد | `IMPLEMENTED_AND_VERIFIED` | API فعالیت اخیر و قدم بعدی ثبت‌شده یا وظیفهٔ قابل پیگیری پروژه را با زمان و لینک برمی‌گرداند. حالت ادامهٔ کار در سرور اجرا می‌شود. آزمون HTTP روی PostgreSQL، نبود ارسال بیرونی، رد پروژه و رویداد غیرمجاز و دسترسی به رویداد از لینک استناد را تأیید کرد. جست‌وجوی معنایی و ارزیابی مدل در حساب Staging بازند. |
+| اعتبارسنجی آفلاین آرشیو و بازیابی فاکتور و پرداخت | `IMPLEMENTED_AND_VERIFIED` | `npm run verify:postgres-backup` اصالت، جدول‌های لازم و خواندن داده‌های آرشیو را بررسی می‌کند. در `test:postgres` آرشیو ناقص و دادهٔ نامعتبر رد شدند. یک Restore جداگانه پرداخت و وضعیت ابطال فاکتور را از Backup بازیابی کرد. |
 | پذیرش کل فاز ۱ | `PARTIAL` | سناریوهای اصلی ماندگاری و روال‌های جدید سبز هستند. تکمیل پوشش مجموعه‌های تاریخی و یکپارچگی همهٔ فرم‌ها باز است. |
 
 `npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ ۲۷‌تایی در Chrome و Firefox سبز شد. WebKit ابتدا یکی از آزمون‌های RTL را با خطای Prefetch هنگام جابه‌جایی اجباری ثبت کرد. آزمون مرور هر مسیر را به سند جدا منتقل کرد و مسیر ۳۹۰ پیکسل در دو اجرای پی‌درپی موفق شد. ۱۳ آزمون تاریخی Workflow همچنان از الگوی دمو استفاده می‌کنند و برای این نسخه تأیید نشده‌اند.
@@ -36,6 +37,18 @@ Job یکپارچهٔ Migration و بازیابی PostgreSQL 16 پس از اصل�
 نسخهٔ فاکتور Build، TypeScript و ESLint را پاس کرد. `test:smoke` در Chrome با ۳۱/۳۱، `test:core` با ۴۶/۴۶، `test:postgres` با یک نتیجه و `test:postgres-http` با آزمون HTTP روی PostgreSQL 17.12 موفق بودند. فایل‌های اصلی `src/components/invoice-ledger.tsx`، `src/lib/server/db.ts`، `src/lib/server/validation.ts`، `schema/postgres/005_invoice_records.sql` و `tests/release.spec.ts` هستند.
 
 هر چهار Job نسخهٔ مالی روی Windows، Ubuntu، PostgreSQL 16 و CodeQL موفق شدند. [CI فاکتور و پرداخت](https://github.com/alirava56/progect_os/actions/runs/44701353073)
+
+### وضعیت جاری Gateها
+
+| Gate | وضعیت | آخرین شواهد و مسیرها | شرط باقی‌مانده |
+|---|---|---|---|
+| A | **FAIL** | `npm run lint`، `npm run typecheck`، `npm run build`، Core با ۴۶ نتیجه و Chrome با ۳۲ نتیجه. `tests/functional.spec.ts`، `tests/release.spec.ts`، `tests/responsive.spec.ts` و Workflowهای GitHub Actions. | ۱۳ سناریوی تاریخی `tests/workflows.spec.ts` با داده و انتظارات دمو هنوز در پذیرش جاری تأیید نشده‌اند. |
+| B | **FAIL** | Auth، MFA، CSRF، Grant و هم‌زمانی در Core و HTTP. `npm run test:postgres`، `npm run test:postgres-http` و Migrationهای `schema/postgres/` شامل ۰۰۵. | نرمال‌سازی کامل مدل هدف، سیاست PostgreSQL RLS، مرور مجوز حساب سرویس و تمرین Cutover و Rollback محیط هدف. |
+| C | **BLOCKED** | Lease و بازیابی پس از قطع Worker در Core، آزمون قرارداد Vault، تحویل Mock، سلامت آفلاین و Restore جداگانه در `test:postgres` و `scripts/postgres-archive.mjs`. | `BLOCKED_EXTERNAL` برای Vault و ارائه‌دهندگان ارسال در Staging، Timer محیط هدف، نگهداری Offsite و سنجش RPO/RTO. |
+| D | **FAIL** | عامل دیسک، GitHub با Backfill محدود، فاکتور و پرداخت و ادامهٔ کار مجوزمحور در Build، Core، PostgreSQL و Playwright. `src/lib/server/project-memory.ts`، `src/components/invoice-ledger.tsx` و `scripts/verify-postgres-http.mjs`. | جست‌وجوی معنایی، FX مستند، تطبیق تسویهٔ قرارداد، پایش VPN/SLO و Backfill خودکار. آزمون حساب‌های خارجی مدل، GitHub و پایش در وضعیت `BLOCKED_EXTERNAL` است. |
+| E | **FAIL** | ۲۱ مسیر RTL در شش عرض، axe روی ورود و داشبورد، آزمون Postgres مهاجرت و بازیابی و مرزهای دسترسی و هم‌زمانی HTTP. | تکمیل Workflowهای تاریخی، بررسی دستی WCAG 2.2 AA، ممیزی مستقل، بار پایدار محیط هدف و DR/Cutover آزمایشی. |
+
+گزارش تاریخی ۱۹ نوامبر در ادامه حفظ شده است. وضعیت جاری هر Gate در جدول بالا ثبت شده است و حکم انتشار Production **NO-GO** است.
 
 **حکم انتشار Production: NO-GO**
 

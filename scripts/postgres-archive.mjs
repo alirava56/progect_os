@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, unlink, link, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
-import { basename } from 'node:path';
+import { devNull, tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import pg from 'pg';
@@ -19,6 +18,13 @@ const diagnostics = [
   [/could not execute query/i, 'database rejected a restore command'],
 ];
 
+function toolEnvironment() {
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^PG/i.test(name) && !/^PROJECTOS_/i.test(name))),
+    LC_ALL: 'C',
+  };
+}
+
 function connection(value) {
   const url = new URL(value);
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.search || url.hash || !url.username || !url.pathname.slice(1)) {
@@ -29,22 +35,21 @@ function connection(value) {
     url, loopback,
     database: decodeURIComponent(url.pathname.slice(1)),
     env: {
-      ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^PG/i.test(name) && !/^PROJECTOS_/i.test(name))),
+      ...toolEnvironment(),
       PGHOST: url.hostname.replace(/^\[|\]$/g, ''), PGPORT: url.port || '5432',
       PGUSER: decodeURIComponent(url.username), PGPASSWORD: decodeURIComponent(url.password),
       PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
       PGSSLMODE: loopback ? 'disable' : 'verify-full',
       ...(process.env.PGSSLROOTCERT ? { PGSSLROOTCERT: process.env.PGSSLROOTCERT } : {}),
       PGCONNECT_TIMEOUT: '5',
-      LC_ALL: 'C',
     },
   };
 }
 
-function run(program, args, config) {
+function run(program, args, env = toolEnvironment()) {
   const bin = process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN, program) : program;
   const operation = program === 'pg_dump' ? 'PostgreSQL dump' : args.includes('--list') ? 'PostgreSQL restore catalog' : 'PostgreSQL restore';
-  const child = spawn(bin, args, { env: config.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let stderr = '';
   child.stderr.on('data', chunk => { if (stderr.length < 4096) stderr = (stderr + chunk.toString()).slice(0, 4096); });
   const completion = new Promise((ok, fail) => {
@@ -67,7 +72,7 @@ export async function backupPostgres(destination, connectionString, passphrase) 
   const finalPath = resolve(destination);
   const {randomUUID} = await import('node:crypto');
   const temporary = join(dirname(finalPath), '.' + basename(finalPath) + '.' + randomUUID() + '.part');
-  const { child, completion } = run('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', '--schema=public'], config);
+  const { child, completion } = run('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', '--schema=public'], config.env);
   // Attach immediately so a short-lived pg_dump cannot exit before Node observes its stdout.
   const buffered=new PassThrough();
   const consumed=pipeline(child.stdout,buffered);
@@ -84,6 +89,43 @@ export async function backupPostgres(destination, connectionString, passphrase) 
     if (child.exitCode === null && child.signalCode === null) child.kill();
     await Promise.allSettled([completion,consumed]);
     await unlink(temporary).catch(() => {});
+  }
+}
+
+async function readCatalog(file) {
+  const {child,completion}=run('pg_restore',['--list',file]);
+  let catalog='';
+  try {
+    for await (const chunk of child.stdout) {
+      catalog+=chunk.toString('utf8');
+      if (catalog.length>8*1024*1024) throw new Error('Restore catalog exceeds expected bounds');
+    }
+    await completion;
+    return catalog;
+  } finally {
+    if (child.exitCode===null && child.signalCode===null) child.kill();
+    await completion.catch(()=>{});
+  }
+}
+
+export async function verifyPostgresBackup(source,passphrase) {
+  const scratch=await mkdtemp(join(tmpdir(),'projectos-verify-pg-'));
+  const file=join(scratch,'archive.dump');
+  try {
+    await decryptArchive(resolve(source),file,passphrase,postgresHeader);
+    const catalog=await readCatalog(file);
+    for (const table of ['workspaces','users','memberships','records','document_versions']) {
+      if (!new RegExp('^\\d+;\\s+\\d+\\s+\\d+\\s+TABLE DATA public '+table+'\\s','m').test(catalog)) {
+        throw new Error('PostgreSQL archive is missing a required ProjectOS table');
+      }
+    }
+    // SQL is generated only to verify data decoding. No database connection is used.
+    const {child,completion}=run('pg_restore',['--file='+devNull,file]);
+    child.stdout.resume();
+    await completion;
+    return {ok:true,format:'PROJECTOS-POSTGRES-v1',encrypted:true,catalogVerified:true,dataDecoded:true};
+  } finally {
+    await rm(scratch,{recursive:true,force:true,maxRetries:5});
   }
 }
 
@@ -109,16 +151,7 @@ export async function restorePostgres(source, restoreUrl, passphrase) {
     const present = await client.query(`SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f') LIMIT 1`);
     if (present.rowCount) throw new Error('Restore database must be empty');
-    const listing = run('pg_restore', ['--list', data], config);
-    let toc = '';
-    for await (const chunk of listing.child.stdout) {
-      toc += chunk.toString('utf8');
-      if (toc.length > 8 * 1024 * 1024) {
-        listing.child.kill();
-        throw new Error('Restore catalog exceeds expected bounds');
-      }
-    }
-    await listing.completion;
+    const toc = await readCatalog(data);
     // A newly created database already contains public. Leave that namespace in place.
     const listPath = join(scratch, 'restore.list');
     const filtered = toc.split(/\r?\n/).filter(line => !/^\d+;\s+\d+\s+\d+\s+SCHEMA\s+-\s+public\s/.test(line));
@@ -126,7 +159,7 @@ export async function restorePostgres(source, restoreUrl, passphrase) {
     const { child, completion } = run('pg_restore', [
       '--single-transaction', '--exit-on-error', '--no-owner', '--no-privileges', '--use-list=' + listPath,
       '--dbname=' + config.database, data,
-    ], config);
+    ], config.env);
     child.stdout.resume();
     await completion;
     const verified = (await client.query(`SELECT (SELECT COUNT(*) FROM workspaces) AS workspaces,

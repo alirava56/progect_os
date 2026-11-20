@@ -26,6 +26,7 @@
     "db:migrate": "node scripts/migrate-postgres.mjs",
     "db:import:sqlite": "node scripts/migrate-sqlite-postgres.mjs",
     "backup:postgres": "node scripts/postgres-backup.mjs backup",
+    "verify:postgres-backup": "node scripts/postgres-backup.mjs verify",
     "restore:postgres": "node scripts/postgres-backup.mjs restore",
     "test:postgres": "node --test scripts/postgres.test.cjs",
     "test:postgres-http": "node scripts/verify-postgres-http.mjs",

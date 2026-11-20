@@ -4,8 +4,11 @@ PostgreSQL به ابزارهای `pg_dump` و `pg_restore` سازگار با ن�
 
 ```powershell
 npm run backup:postgres -- .\backups\projectos-first.posbak
+npm run verify:postgres-backup -- .\backups\projectos-first.posbak
 npm run restore:postgres -- .\backups\projectos-first.posbak
 ```
+
+فرمان `verify:postgres-backup` به نشانی PostgreSQL نیاز ندارد. تگ اصالت، فهرست جدول‌های اصلی و خواندن کامل داده‌ها با `pg_restore` بررسی می‌شوند. SQL خروجی به دستگاه تهی می‌رود. فایل رمزگشایی‌شده در پوشهٔ موقت فرایند ساخته و در پایان پاک می‌شود. برای آرشیو حساس، محل موقت را روی دیسک رمزنگاری‌شده قرار دهید. پس از این بررسی، تمرین Restore را جداگانه روی دیتابیس آزمایشی اجرا کنید.
 
 برای Restore، `PROJECTOS_RESTORE_URL` باید دیتابیس خالی و اختصاصی با نام `projectos_restore_...` باشد. مقصد فعال و مقصد دارای جدول رد می‌شوند. قبل از ورود داده به PostgreSQL، تگ اصالت آرشیو بررسی می‌شود. `pg_restore` در یک تراکنش اجرا می‌شود. پس از Restore، سلامت API، حساب‌ها، پروژه‌ها، نسخهٔ سند و اعلان‌های تحویل‌شده را بررسی کنید. فایل موقت احراز‌شده به دیسک خروجی نیاز دارد. برای دادهٔ حساس از مسیر موقت و دیسک حفاظت‌شده استفاده کنید.
 

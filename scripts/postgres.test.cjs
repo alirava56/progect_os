@@ -139,6 +139,7 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     await encryptArchive(Readable.from([Buffer.from('Synthetic text in place of a PostgreSQL archive')]),
       invalidBackup, process.env.PROJECTOS_BACKUP_PASSPHRASE, postgresHeader);
     assert.throws(() => run('postgres-backup.mjs','restore',invalidBackup), /PostgreSQL restore catalog failed/);
+    assert.throws(() => run('postgres-backup.mjs','verify',invalidBackup), /PostgreSQL restore catalog failed/);
     const catalogFixture=join(area,'verify-catalog.dump');
     await decryptArchive(postgresBackup,catalogFixture,process.env.PROJECTOS_BACKUP_PASSPHRASE,postgresHeader);
     const pgRestore=process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN,'pg_restore') : 'pg_restore';
@@ -146,6 +147,17 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     const catalog=execFileSync(pgRestore,['--list',catalogFixture],{encoding:'utf8',timeout:15_000});
     assert.match(catalog,/TABLE public records\b/);
     assert.match(catalog,/TABLE public machine_observations\b/);
+    const truncatedBackup=join(area,'truncated.posbak');
+    const archive=readFileSync(catalogFixture);
+    await encryptArchive(Readable.from([archive.subarray(0,archive.length-512)]),
+      truncatedBackup,process.env.PROJECTOS_BACKUP_PASSPHRASE,postgresHeader);
+    assert.throws(() => run('postgres-backup.mjs','verify',truncatedBackup),/PostgreSQL restore .*failed/);
+    const verifyOffline=(filename)=>JSON.parse(execFileSync(process.execPath,[join(__dirname,'postgres-backup.mjs'),'verify',filename],{
+      encoding:'utf8',env:{...process.env,PROJECTOS_DATABASE_URL:'disabled',PROJECTOS_RESTORE_URL:'disabled'},timeout:30_000,
+    }));
+    assert.deepEqual(verifyOffline(postgresBackup),{
+      ok:true,format:'PROJECTOS-POSTGRES-v1',encrypted:true,catalogVerified:true,dataDecoded:true,
+    });
     const restored = JSON.parse(run('postgres-backup.mjs','restore',postgresBackup));
     assert.equal(Number(restored.workspaces), 1);
     assert.equal(Number(restored.document_versions), 1);
@@ -209,6 +221,19 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     await assert.rejects(commitRecordChanges(owner,voidedVersion,[{kind:'invoices',id:unpaid.id,action:'replace',
       record:unpaid}]),/only be voided/);
     assert.equal((await loadState(owner)).data.invoices.find(row=>row.id===unpaid.id).state,'void');
+    const ledgerRestore='projectos_restore_ledger_'+suffix;
+    await admin.query('CREATE DATABASE "'+ledgerRestore+'"');
+    created.push(ledgerRestore);
+    process.env.PROJECTOS_RESTORE_URL=connectionFor(ledgerRestore);
+    const ledgerBackup=join(area,'ledger.posbak');
+    assert.equal(JSON.parse(run('postgres-backup.mjs','backup',ledgerBackup)).ok,true);
+    assert.equal(verifyOffline(ledgerBackup).dataDecoded,true);
+    assert.equal(JSON.parse(run('postgres-backup.mjs','restore',ledgerBackup)).ok,true);
+    await closeDatabase();
+    process.env.PROJECTOS_DATABASE_URL=connectionFor(ledgerRestore);
+    const restoredLedger=(await loadState(owner)).data;
+    assert.deepEqual(restoredLedger.payments,[saved]);
+    assert.equal(restoredLedger.invoices.find(row=>row.id===unpaid.id).state,'void');
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');
