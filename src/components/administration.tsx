@@ -16,10 +16,10 @@ export function Integrations() {
   const [github,setGithub]=useState<{status:string;repositories:Array<{repository:string;projectId:string;state:string;openIssues?:number;checkedAt?:string|null;latestDeployment?:{state:string}|null}>}|null>(null);
   const [syncing,setSyncing]=useState(false);
   const [syncMessage,setSyncMessage]=useState('');
-  async function sync(repository:string,projectId:string){
+  async function sync(repository:string,projectId:string,backfill=false){
     setSyncing(true);setSyncMessage('');
     try{
-      const result=await fetch('/api/integrations/github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repository,projectId})});
+      const result=await fetch('/api/integrations/github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repository,projectId,backfill})});
       if(!result.ok)throw new Error(result.status===429?'محدودیت نرخ GitHub. پس از وقفهٔ اعلام‌شده دوباره تلاش کنید.':'همگام‌سازی در دسترس نیست.');
       const current=await result.json();
       setGithub(value=>value?{...value,repositories:value.repositories.map(repo=>repo.projectId===projectId&&repo.repository===repository?current:repo)}:value);
@@ -42,21 +42,26 @@ export function Integrations() {
         <h2><bdi>{i.name}</bdi></h2><p className="muted">{i.description}</p>
         <div className="integration-end"><Button onClick={() => setSelected(i)} icon={Plug2}>جزئیات اتصال</Button><small className="muted" dir="ltr">{i.protocol}</small></div>
       </Panel>)}</div>
-      {github?.repositories?.length? <Panel title="GitHub · آخرین بررسی API">{github.repositories.map(repo=><Row key={repo.projectId+':'+repo.repository} icon={Plug2} title={<bdi dir="ltr">{repo.repository}</bdi>}
+      {github?.repositories?.length? <div id="github-repositories"><Panel title="GitHub · آخرین بررسی API">{github.repositories.map(repo=><Row key={repo.projectId+':'+repo.repository} icon={Plug2} title={<bdi dir="ltr">{repo.repository}</bdi>}
         meta={repo.state==='connected'?`اقلام باز: ${repo.openIssues??'نامشخص'} · بررسی: ${repo.checkedAt?new Date(repo.checkedAt).toLocaleString('fa-IR'):'نامشخص'} · استقرار: ${repo.latestDeployment?.state??'نامشخص'}`:'وضعیت فعلی نامشخص'}
         end={<div className="control-group"><Pill tone={repo.state==='connected'?'good':'warn'}>{repo.state==='connected'?'دریافت موفق':'نامشخص'}</Pill>
-          <Button disabled={syncing||github.status!=='configured'} onClick={()=>void sync(repo.repository,repo.projectId)}>همگام‌سازی</Button></div>} />)}
-          {syncMessage&&<p role="status">{syncMessage}</p>}</Panel>:null}
+          <Button disabled={syncing||github.status!=='configured'} onClick={()=>void sync(repo.repository,repo.projectId)}>همگام‌سازی</Button>
+          <Button disabled={syncing||github.status!=='configured'} onClick={()=>void sync(repo.repository,repo.projectId,true)}>دریافت سابقه</Button></div>} />)}
+          {syncMessage&&<p role="status">{syncMessage}</p>}</Panel></div>:null}
       <Callout>اتصال خواندنی GitHub فقط پس از تنظیم توکن و فهرست مخازن مجاز روی سرور کار می‌کند. سایر اتصال‌ها فعال نیستند؛ توکن را داخل فرم‌های برنامه وارد نکنید.</Callout>
     </div>
     {catalog && <Modal title="فهرست اتصال‌ها" onClose={() => setCatalog(false)}>
       {data.integrations.map(i => <Row onClick={() => {setCatalog(false);setSelected(i);}} key={i.id} icon={Plug2} title={<bdi>{i.name}</bdi>} meta={i.description} end={<Pill tone="neutral">متصل نیست</Pill>} />)}
     </Modal>}
     {selected && <Modal title={selected.name} onClose={() => setSelected(undefined)}><div className="form-stack">
-      <div className="flex items-center justify-between"><Art name={selected.art} size={65} /><Pill tone="neutral">متصل نیست</Pill></div>
+      <div className="flex items-center justify-between"><Art name={selected.art} size={65} /><Pill tone="neutral">
+        {selected.id==='github'&&github?.status==='configured'?'تنظیم شده':'متصل نیست'}
+      </Pill></div>
       <p>{selected.description} · <bdi dir="ltr">{selected.protocol}</bdi></p>
-      <Callout>اتصال هنوز پیاده‌سازی نشده و هیچ توکن یا دسترسی خارجی درخواست نمی‌شود.</Callout>
-      <div><Button disabled icon={Plug2}>برقراری اتصال</Button></div>
+      {selected.id==='github' ? <>
+        <Callout>مخزن‌ها و دسترسی خواندنی GitHub روی سرور تنظیم می‌شوند.</Callout>
+        {!!github?.repositories.length && <a className="cell-link" href="#github-repositories" onClick={()=>setSelected(undefined)}>مشاهدهٔ مخازن</a>}
+      </> : <Callout>تنظیم این اتصال از رابط در دسترس نیست.</Callout>}
     </div></Modal>}
   </>;
 }

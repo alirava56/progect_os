@@ -479,3 +479,33 @@ test('server details expose real-source measurements and hide stale percentages'
   await expect(metric('Disk')).toContainText('نامشخص');
   await expect(metric('Disk')).not.toContainText('۷۵٪');
 });
+
+test('the project page renders GitHub commits branches and pull requests with snapshot status', async ({page, origin}) => {
+  await bootstrap(page.request,origin);
+  const target=project('repository-fixture');
+  const seed=await page.request.patch('/api/records',{headers:origin,data:{version:0,changes:[create('projects',target)]}});
+  expect(seed.status()).toBe(200);
+  const checkedAt='2026-11-20T08:30:00.000Z';
+  let state='connected';
+  await page.route(/\/api\/integrations\/github\?projectId=repository-fixture$/,route=>route.fulfill({json:{
+    status:'configured',repositories:[{repository:'fixture/sample',state,checkedAt,
+      commits:[{sha:'a'.repeat(40),subject:'Synthetic commit title',committedAt:checkedAt}],
+      branches:[{name:'fixture-branch',sha:'a'.repeat(40)}],
+      pullRequests:[{number:3,title:'Synthetic pull title',status:'merged',updatedAt:checkedAt}],
+      issues:[{number:7,title:'Synthetic issue title'}]}],
+  }}));
+  await page.goto('/projects/'+target.id);
+  await expect(page.getByRole('link',{name:'fixture/sample'})).toHaveAttribute('href','https://github.com/fixture/sample');
+  await expect(page.getByText('دریافت موفق',{exact:true})).toBeVisible();
+  for(const [label,title] of [
+    ['Commitها','Synthetic commit title'],['شاخه‌ها','fixture-branch'],
+    ['درخواست‌های ادغام','Synthetic pull title'],['Issueهای باز','Synthetic issue title'],
+  ]) {
+    await page.getByText(label,{exact:true}).click();
+    await expect(page.getByText(title,{exact:true})).toBeVisible();
+  }
+  state='stale';
+  await page.reload();
+  await expect(page.getByText('دادهٔ قدیمی',{exact:true})).toBeVisible();
+  await expect(page.getByText('دریافت موفق',{exact:true})).toHaveCount(0);
+});

@@ -20,7 +20,7 @@ Application API responses containing workspace or authentication data are privat
 | `/api/vault/{id}` | GET, POST | Owner metadata observation. POST requires password and enrolled second factor. |
 | `/api/monitoring` | GET | Project-scoped HTTPS and machine observations, with time and freshness. Optional `resourceId` selects one authorized resource. |
 | `/api/monitoring/observations` | POST | Explicit server-side workspace and resource allowlist, machine credential and bounded observation data. Disk byte counters are optional and must arrive as a valid pair. |
-| `/api/integrations/github` | GET, POST | Owner snapshot read and explicit read-only synchronization for configured repositories. |
+| `/api/integrations/github` | GET, POST | GET reads a project authorized by `projectId`. The unfiltered read and synchronization are Owner-only. Optional POST `backfill: true` requests at most three pages of activity per collection. |
 | `/api/integrations/github/webhook` | POST | Signed bounded payload and deduplicated delivery for configured mappings. |
 | `/api/assistant` | POST | Permission-aware project sources. External requests require explicit query approval and server opts. Returned model selections must occur verbatim in available sources. |
 | `/api/health` | GET | Readiness status without identifiers or sensitive metadata. |

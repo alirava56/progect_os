@@ -16,6 +16,8 @@
 
 `PROJECTOS_GITHUB_PROJECTS` آرایهٔ JSON از اشیای `{workspaceId,projectId,repository}` است. Allowlist قبلی `PROJECTOS_GITHUB_REPOS` باید با این نگاشت جایگزین شود تا هر مخزن دامنهٔ روشنی داشته باشد. با توکن خواندنی محدود به مخازن آزمایشی، مالک می‌تواند Overview، نمونهٔ Issue و Release و وضعیت آخرین Deployment را به‌روز کند. محدودیت نرخ زمان Retry دارد. Webhook معتبر با بدنهٔ HMAC و کلید `PROJECTOS_GITHUB_WEBHOOK_SECRET` به‌صورت idempotent ثبت می‌شود و خواندن را در انتظار Refresh قرار می‌دهد. بعد از دریافت رویداد، همگام‌سازی از پنل قابل اجراست. [اعتبارسنجی GitHub Webhook](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
 
+صفحهٔ پروژه نمونهٔ تاریخ‌دار Commitها، شاخه‌ها، Pull Requestها و Issueهای باز را نشان می‌دهد. «همگام‌سازی» نمونهٔ اخیر و «دریافت سابقه» حداکثر ۳۰ قلم در هر نوع را بررسی می‌کند. اجرای بعدی نمونهٔ جاری را به‌روز می‌کند. مجوز خواندن Contents، Pull requests، Issues و Deployment را برای همان مخازن بررسی کنید. [Commit API](https://docs.github.com/en/rest/commits/commits#list-commits) · [Branch API](https://docs.github.com/en/rest/branches/branches#list-branches) · [Pull Request API](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests)
+
 ## پایش و حافظه پروژه
 
 Worker HTTPS روی `PROJECTOS_MONITOR_HOSTS` و `PROJECTOS_MONITOR_WORKSPACE` محدود است. عامل میزبان فقط از مسیر امن `/api/monitoring/observations` گزارش می‌دهد و به شناسهٔ منابع مجاز محدود می‌شود. برای فعال‌سازی اندازه‌گیری دیسک، `PROJECTOS_AGENT_DISK_PATH` را روی مسیر فایل‌سیستم در همان میزبان تنظیم کنید. عامل فقط ظرفیت و مصرف را ارسال می‌کند. نام مسیر در دادهٔ پایش ثبت نمی‌شود. وضعیت تازه، قدیمی و نامشخص و منبع مشاهده مشخص است. پایش VPN و SLA چندنقطه‌ای به اتصال آزمایشی جداگانه نیاز دارد.

@@ -135,10 +135,17 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     const report = JSON.parse(run('postgres-backup.mjs','backup',postgresBackup));
     assert.equal(report.encrypted, true);
     const invalidBackup = join(area, 'invalid.posbak');
-    const { encryptArchive, postgresHeader } = await import('./encrypted-archive.mjs');
+    const { decryptArchive, encryptArchive, postgresHeader } = await import('./encrypted-archive.mjs');
     await encryptArchive(Readable.from([Buffer.from('Synthetic text in place of a PostgreSQL archive')]),
       invalidBackup, process.env.PROJECTOS_BACKUP_PASSPHRASE, postgresHeader);
     assert.throws(() => run('postgres-backup.mjs','restore',invalidBackup), /PostgreSQL restore catalog failed/);
+    const catalogFixture=join(area,'verify-catalog.dump');
+    await decryptArchive(postgresBackup,catalogFixture,process.env.PROJECTOS_BACKUP_PASSPHRASE,postgresHeader);
+    const pgRestore=process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN,'pg_restore') : 'pg_restore';
+    // This process sees an archive seeded entirely with synthetic data. Keep production CLI diagnostics fixed and sanitized.
+    const catalog=execFileSync(pgRestore,['--list',catalogFixture],{encoding:'utf8',timeout:15_000});
+    assert.match(catalog,/TABLE public records\b/);
+    assert.match(catalog,/TABLE public machine_observations\b/);
     const restored = JSON.parse(run('postgres-backup.mjs','restore',postgresBackup));
     assert.equal(Number(restored.workspaces), 1);
     assert.equal(Number(restored.document_versions), 1);

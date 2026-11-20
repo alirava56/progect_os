@@ -12,6 +12,7 @@ import type { Project, Resource, Task } from '@/lib/types';
 import { projectCompleteness } from '@/lib/completeness';
 import { Art, Button, Empty, Filter, Glyph, Heading, LinkButton, Metrics, Modal, Panel, Pill, Progress, Row, SearchField, SectionBar, Segments, Table, TextLink, visibleLink } from './ui';
 import { DocForm, ProjectForm, ResourceForm, TaskForm, projectName } from './forms';
+import { ProjectGitHub } from './project-github';
 
 export function ProjectTable({ projects }: { projects: Project[] }) {
   return <Table compact label="فهرست پروژه‌ها" rows={projects} columns={[
@@ -209,6 +210,7 @@ export function ProjectDetails({ id }: { id: string }) {
         <Panel title="تاریخچه و تصمیم‌های اخیر" action={<Button variant="ghost" onClick={() => setTab('activity')}>همه فعالیت‌ها</Button>}>
           {events.length ? <div className="grid-3">{events.slice(0,3).map(e => <div key={e.id} className="mini-event"><strong>{e.title}</strong><small>{e.source} · {dateLabel(e.date)}</small></div>)}</div> : <Empty title="رویدادی ثبت نشده است" />}
         </Panel>
+        <ProjectGitHub key={id} projectId={id} />
       </>}
       {tab === 'tasks' && <Panel title="وظایف پروژه"><ProjectTaskRows tasks={tasks} /></Panel>}
       {tab === 'resources' && <Panel title="منابع متصل" action={isOwner && !archived && <Button icon={Plus} onClick={() => setModal('resource')}>افزودن منبع</Button>}><ProjectResourceRows resources={resources} /></Panel>}

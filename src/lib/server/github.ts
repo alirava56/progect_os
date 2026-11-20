@@ -10,6 +10,9 @@ export type RepositorySnapshot = {
   updatedAt?: string;
   openIssues?: number;
   issues?: Array<{number: number; title: string}>;
+  commits?: Array<{sha: string; subject: string; committedAt: string | null}>;
+  branches?: Array<{name: string; sha: string}>;
+  pullRequests?: Array<{number: number; title: string; status: 'open' | 'closed' | 'merged'; updatedAt: string | null}>;
   releases?: Array<{tag: string; publishedAt: string | null}>;
   latestDeployment?: {id: number; state: string} | null;
   retryAt?: string;
@@ -57,12 +60,27 @@ function retryTime(response: Response, now: number) {
 type Issue = {number?: unknown; title?: unknown; pull_request?: unknown};
 type Release = {tag_name?: unknown; published_at?: unknown};
 type Deployment = {id?: unknown};
+type Commit = {sha?: unknown; commit?: {message?: unknown; committer?: {date?: unknown} | null}};
+type Branch = {name?: unknown; commit?: {sha?: unknown}};
+type Pull = {number?: unknown; title?: unknown; state?: unknown; merged_at?: unknown; updated_at?: unknown};
+const gitSha = (value: unknown): value is string => typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value);
+const timestamp = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 function records<T>(value: unknown): T[] {
   if (!Array.isArray(value)) throw new Error('Unexpected GitHub response');
   return value.filter(item => item && typeof item === 'object') as T[];
 }
 
-export async function syncRepository(repository: string, token: string, request = fetch, clock = new Date()): Promise<RepositorySnapshot> {
+function unique<T>(items:T[], key:(item:T)=>string|number) {
+  const seen=new Set<string|number>();
+  return items.filter(item=>{
+    const id=key(item);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+export async function syncRepository(repository: string, token: string, request = fetch, clock = new Date(), backfill = false): Promise<RepositorySnapshot> {
   const checkedAt = clock.toISOString();
   async function query(path: string): Promise<unknown> {
     const response = await request('https://api.github.com/repos/' + repository + path, {
@@ -76,18 +94,39 @@ export async function syncRepository(repository: string, token: string, request 
     }
     return response.json();
   }
+
+  async function activity<T>(path: string, params = '') {
+    const items: T[] = [];
+    for (let page = 1; page <= (backfill ? 3 : 1); page++) {
+      const batch = records<T>(await query(path + '?per_page=10&page=' + page + params));
+      items.push(...batch.slice(0,10));
+      if (batch.length < 10) break;
+    }
+    return items;
+  }
   try {
     // A repository quota response avoids launching follow-up requests.
     const overview = await query('') as { pushed_at?: unknown; open_issues_count?: unknown };
-    const [issueItems, releaseItems, deployItems] = await Promise.all([
-      query('/issues?state=open&per_page=10'), query('/releases?per_page=5'), query('/deployments?per_page=1'),
+    const [issueItems, releaseItems, deployItems, commitItems, branchItems, pullItems] = await Promise.all([
+      activity<Issue>('/issues','&state=open'), query('/releases?per_page=5'), query('/deployments?per_page=1'),
+      activity<Commit>('/commits'), activity<Branch>('/branches'), activity<Pull>('/pulls','&state=all&sort=updated&direction=desc'),
     ]);
-    const issues = records<Issue>(issueItems).filter(issue => !issue.pull_request && typeof issue.number === 'number'
-      && Number.isSafeInteger(issue.number) && typeof issue.title === 'string').slice(0,10)
+    const issues = issueItems.filter(issue => !issue.pull_request && typeof issue.number === 'number'
+      && Number.isSafeInteger(issue.number) && typeof issue.title === 'string')
       .map(issue => ({number:issue.number as number, title:redactCredentials((issue.title as string).slice(0,160))}));
     const releases = records<Release>(releaseItems).filter(release => typeof release.tag_name === 'string').slice(0,5)
       .map(release => ({tag:redactCredentials((release.tag_name as string).slice(0,100)),
         publishedAt:typeof release.published_at === 'string' && Number.isFinite(Date.parse(release.published_at)) ? release.published_at : null}));
+    const commits=commitItems.flatMap(({sha,commit})=>gitSha(sha) && typeof commit?.message === 'string'
+      ? [{sha,subject:redactCredentials(commit.message.split(/\r?\n/,1)[0]).slice(0,160),committedAt:timestamp(commit.committer?.date)}] : []);
+    const branches=branchItems.flatMap(({name,commit})=>gitSha(commit?.sha) && typeof name==='string'
+      ? [{name:redactCredentials(name).slice(0,120),sha:commit.sha}] : []);
+    const pullRequests=pullItems.flatMap<NonNullable<RepositorySnapshot['pullRequests']>[number]>(({number,title,state,merged_at,updated_at})=>{
+      if (typeof number!=='number' || !Number.isSafeInteger(number) || number<1 || typeof title!=='string'
+        || (state!=='open' && state!=='closed')) return [];
+      const status=timestamp(merged_at) ? 'merged' : state;
+      return [{number,title:redactCredentials(title).slice(0,160),status,updatedAt:timestamp(updated_at)}];
+    });
     const deploymentId = records<Deployment>(deployItems)[0]?.id;
     let latestDeployment: RepositorySnapshot['latestDeployment'] = null;
     if (typeof deploymentId === 'number' && Number.isSafeInteger(deploymentId) && deploymentId > 0) {
@@ -101,7 +140,8 @@ export async function syncRepository(repository: string, token: string, request 
       repository, checkedAt, state:'connected',
       updatedAt:typeof overview?.pushed_at === 'string' && Number.isFinite(Date.parse(overview.pushed_at)) ? overview.pushed_at : undefined,
       openIssues:typeof overview?.open_issues_count === 'number' && Number.isSafeInteger(overview.open_issues_count) ? overview.open_issues_count : undefined,
-      issues, releases, latestDeployment,
+      issues:unique(issues,item=>item.number),commits:unique(commits,item=>item.sha),
+      branches:unique(branches,item=>item.name),pullRequests:unique(pullRequests,item=>item.number),releases,latestDeployment,
     };
   } catch (error) {
     const retryAt = error instanceof GitHubUnavailable ? error.retryAt : undefined;

@@ -721,6 +721,45 @@ test('GitHub quota is reported with a retry timestamp and signed data is validat
   assert.equal(signedDelivery(raw,null,key),false);
 });
 
+test('GitHub activity backfill is bounded and keeps only sanitized repository metadata',async ()=>{
+  const {syncRepository}=require('../src/lib/server/github.ts');
+  const checkedAt='2026-11-20T11:00:00.000Z';
+  const calls=[];
+  const fakeToken='fixture-github-read-only-value';
+  const sha='a'.repeat(40);
+  const request=async (input,options)=>{
+    const url=new URL(input);
+    assert.equal(url.hostname,'api.github.com');
+    assert.equal(options.redirect,'error');
+    assert.equal(options.headers.Authorization,'Bearer '+fakeToken);
+    const path=url.pathname.slice('/repos/fixture/repository'.length);
+    const page=Number(url.searchParams.get('page'));
+    calls.push([path,page]);
+    if(!path) return Response.json({pushed_at:checkedAt,open_issues_count:2});
+    if(path==='/branches') return Response.json(Array.from({length:10},(_,i)=>({
+      name:i===0?'branch-shared':`branch-${page}-${i}`,commit:{sha},protection_url:'not-exported',
+    })));
+    if(path==='/commits') return Response.json([{sha,commit:{
+      message:'token=synthetic-unpublished-value\nprivate body',committer:{date:checkedAt,email:'discard@example.test'},
+    }}]);
+    if(path==='/pulls') return Response.json([{number:3,title:'Reviewed fixture',state:'closed',merged_at:checkedAt,updated_at:checkedAt,
+      body:'unexported content'}]);
+    if(path==='/issues') return Response.json([{number:7,title:'Fixture issue'},{number:3,title:'Pull',pull_request:{}}]);
+    return Response.json([]);
+  };
+  const snapshot=await syncRepository('fixture/repository',fakeToken,request,new Date(checkedAt),true);
+  assert.equal(snapshot.state,'connected');
+  assert.deepEqual(calls.filter(([name])=>name==='/branches').map(([,page])=>page),[1,2,3]);
+  assert.equal(snapshot.branches.length,28);
+  assert.deepEqual(snapshot.commits,[{sha,subject:'[REDACTED CREDENTIAL]',committedAt:checkedAt}]);
+  assert.deepEqual(snapshot.pullRequests,[{number:3,title:'Reviewed fixture',status:'merged',updatedAt:checkedAt}]);
+  assert.deepEqual(snapshot.issues,[{number:7,title:'Fixture issue'}]);
+  const serialized=JSON.stringify(snapshot);
+  for(const text of [fakeToken,'private body','discard@example.test','unexported content','synthetic-unpublished-value']) {
+    assert.equal(serialized.includes(text),false);
+  }
+});
+
 test('HTTPS monitor declines private DNS answers before opening a connection',async ()=>{
   const {probeHttps}=await import('./monitor-probe.mjs');
   const allow=new Set(['probe.projectos-sandbox.net']);

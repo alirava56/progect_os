@@ -63,10 +63,12 @@ try {
   headers.Cookie=cookie.split(';',1)[0];
   const project={id:'http-project',name:'HTTP project',subtitle:'',coverTitle:'HTTP project',description:'',status:'building',
     type:'Website',progress:0,next:'',art:'navigation/projects'};
+  const otherProject={...project,id:'other-project',name:'Other project'};
   const resource={id:'http-server',name:'Synthetic server',projectId:project.id,linkedProjectIds:[],type:'server',
     address:'203.0.113.81',environment:'Development',status:'registered',provider:'Fixture host',tags:[]};
   const change=await fetch(appUrl+'/api/records',{headers,method:'PATCH',body:JSON.stringify({
     version:0,changes:[{kind:'projects',id:project.id,action:'create',record:project},
+      {kind:'projects',id:otherProject.id,action:'create',record:otherProject},
       {kind:'resources',id:resource.id,action:'create',record:resource}],
   })});
   assert.equal(change.status,200);
@@ -76,15 +78,25 @@ try {
   assert.equal((await fetch(appUrl+'/api/state')).status,401);
   const pgClient = new pg.Client({connectionString:runtime.href});
   let workspace;
+  const repositories=[[project.id,'fixture/first'],[otherProject.id,'fixture/second']];
   try {
     await pgClient.connect();
-    assert.equal((await pgClient.query("SELECT COUNT(*) FROM records WHERE kind='projects'")).rows[0].count,'1');
+    assert.equal((await pgClient.query("SELECT COUNT(*) FROM records WHERE kind='projects'")).rows[0].count,'2');
     workspace=(await pgClient.query('SELECT id FROM workspaces')).rows[0].id;
+    const checkedAt=new Date().toISOString();
+    for(const [projectId,repository] of repositories) {
+      const sample={repository,checkedAt,state:'connected',
+        commits:[{sha:'a'.repeat(40),subject:'Verified scoped sample',committedAt:checkedAt}]};
+      await pgClient.query('INSERT INTO github_snapshots(workspace_id,project_id,repo,checked_at,status,payload) VALUES($1,$2,$3,$4,$5,$6)',
+        [workspace,projectId,repository,checkedAt,'connected',JSON.stringify(sample)]);
+    }
   } finally { await pgClient.end(); }
   await stopServer();
   const agentToken='synthetic-runtime-monitor-agent-fixture-only';
   appUrl=await startServer({...env, PROJECTOS_MONITOR_WORKSPACE:workspace,
-    PROJECTOS_MONITOR_AGENT_TOKEN:agentToken, PROJECTOS_MONITOR_AGENT_RESOURCES:resource.id});
+    PROJECTOS_MONITOR_AGENT_TOKEN:agentToken, PROJECTOS_MONITOR_AGENT_RESOURCES:resource.id,
+    PROJECTOS_GITHUB_PROJECTS:JSON.stringify(repositories.map(([projectId,repository])=>({workspaceId:workspace,projectId,repository}))),
+    PROJECTOS_GITHUB_TOKEN:'synthetic-binding-fixture'});
   headers.Origin=appUrl;
   const observe=(body, token=agentToken)=>fetch(appUrl+'/api/monitoring/observations',{
     method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
@@ -113,14 +125,24 @@ try {
   assert.equal((await fetch(appUrl+'/api/monitoring?resourceId=other-resource',{headers})).status,404);
   const viewer='runtime-viewer@example.test';
   const invitation=await fetch(appUrl+'/api/team/invitations',{method:'POST',headers,
-    body:JSON.stringify({email:viewer,role:'viewer',projectIds:[]})});
+    body:JSON.stringify({email:viewer,role:'viewer',projectIds:[otherProject.id]})});
   assert.equal(invitation.status,200);
   const joined=await fetch(appUrl+'/api/auth/accept-invite',{method:'POST',
     headers:{'Content-Type':'application/json',Origin:appUrl,'Sec-Fetch-Site':'same-origin'},
     body:JSON.stringify({token:(await invitation.json()).token,email:viewer,password:account.password,displayName:'Fixture viewer'})});
   assert.equal(joined.status,200);
-  assert.equal((await fetch(endpoint,{headers:{Cookie:joined.headers.get('set-cookie').split(';',1)[0]}})).status,404);
-  console.log(JSON.stringify({ok:true,mode:'production-build-http-postgresql',machineObservation:'scoped-with-disk'}));
+  const viewerHeaders={Cookie:joined.headers.get('set-cookie').split(';',1)[0]};
+  assert.equal((await fetch(endpoint,{headers:viewerHeaders})).status,404);
+  const github=appUrl+'/api/integrations/github';
+  assert.equal((await fetch(github,{headers:viewerHeaders})).status,403);
+  assert.equal((await fetch(github+'?projectId='+project.id,{headers:viewerHeaders})).status,404);
+  const visible=await fetch(github+'?projectId='+otherProject.id,{headers:viewerHeaders});
+  assert.equal(visible.status,200);
+  assert.deepEqual((await visible.json()).repositories.map(({repository})=>repository),['fixture/second']);
+  const denied=await fetch(github,{method:'POST',headers:{...headers,...viewerHeaders},
+    body:JSON.stringify({projectId:otherProject.id,repository:'fixture/second',backfill:true})});
+  assert.equal(denied.status,403);
+  console.log(JSON.stringify({ok:true,mode:'production-build-http-postgresql',machineObservation:'scoped-with-disk',github:'project-scoped'}));
 } finally {
   await stopServer();
   if (existed) await admin.query('DROP DATABASE "' + database + '"');
