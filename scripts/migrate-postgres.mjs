@@ -18,6 +18,7 @@ const migrations = [
   ['014_reminder_role', new URL('../schema/postgres/014_reminder_role.sql', import.meta.url)],
   ['015_private_task_graph', new URL('../schema/postgres/015_private_task_graph.sql', import.meta.url)],
   ['016_audit_project_rls', new URL('../schema/postgres/016_audit_project_rls.sql', import.meta.url)],
+  ['017_integration_rls', new URL('../schema/postgres/017_integration_rls.sql', import.meta.url)],
 ];
 const client = await getPostgresPool().connect();
 try {

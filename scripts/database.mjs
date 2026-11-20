@@ -133,6 +133,8 @@ async function inTransaction(action, readOnly) {
   }
   const client = await getPostgresPool().connect();
   let discard = false;
+  function onConnectionError() { discard = true; }
+  client.on('error', onConnectionError);
   try {
     await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
     const db = postgresExecutor(client);
@@ -159,9 +161,12 @@ async function inTransaction(action, readOnly) {
     await client.query('COMMIT');
     return value;
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch { discard = true; }
+    if (!discard) {
+      try { await client.query('ROLLBACK'); } catch { discard = true; }
+    }
     throw error;
   } finally {
+    client.removeListener('error', onConnectionError);
     client.release(discard);
   }
 }

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getCurrentAccount } from '@/lib/server/auth';
-import { loadState, sql } from '@/lib/server/db';
+import { loadState, projectPolicy, readTransaction } from '@/lib/server/db';
 import { apiError, noStore } from '@/lib/server/http';
 import { validRecordId } from '@/lib/record-contract';
 import { machineObservationFresh, type MachineObservation } from '@/lib/monitoring';
@@ -17,17 +17,19 @@ export async function GET(request: NextRequest) {
   if (resourceId !== null && (!validRecordId(resourceId) || !allowed.has(resourceId))) return apiError('Not found',404);
   const filter = resourceId ? ' AND resource_id=?' : '';
   const params = resourceId ? [account.workspaceId, resourceId] : [account.workspaceId];
-  const [rows, machineRows] = await Promise.all([
-    sql.all<{resourceId: string; checkedAt: string; state: string; statusCode: number | null; latencyMs: number | null; source: string; tlsExpiresAt: string | null}>(
+  const [rows, machineRows] = await readTransaction(async db => {
+    await projectPolicy(db, account);
+    const observations = await db.all<{resourceId: string; checkedAt: string; state: string; statusCode: number | null; latencyMs: number | null; source: string; tlsExpiresAt: string | null}>(
       `SELECT resource_id AS "resourceId",checked_at AS "checkedAt",state,status_code AS "statusCode",
         latency_ms AS "latencyMs",source,tls_expires_at AS "tlsExpiresAt"
-        FROM monitor_observations WHERE workspace_id=?` + filter + ' ORDER BY checked_at DESC LIMIT 200',...params),
-    sql.all<Omit<MachineObservation,'source'|'state'>>(
+        FROM monitor_observations WHERE workspace_id=?` + filter + ' ORDER BY checked_at DESC LIMIT 200',...params);
+    const machine = await db.all<Omit<MachineObservation,'source'|'state'>>(
       `SELECT resource_id AS "resourceId",checked_at AS "checkedAt",cpu_percent AS "cpuPercent",
         used_bytes AS "usedBytes",total_bytes AS "totalBytes",
         disk_used_bytes AS "diskUsedBytes",disk_total_bytes AS "diskTotalBytes"
-        FROM machine_observations WHERE workspace_id=?` + filter + ' ORDER BY checked_at DESC LIMIT 200',...params),
-  ]);
+        FROM machine_observations WHERE workspace_id=?` + filter + ' ORDER BY checked_at DESC LIMIT 200',...params);
+    return [observations,machine] as const;
+  });
   const now = Date.now();
   const freshnessWindowMinutes = 15;
   const observations = rows.filter(row => allowed.has(row.resourceId)).map(row => {

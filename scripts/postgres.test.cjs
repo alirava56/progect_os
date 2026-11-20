@@ -270,6 +270,19 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     }
     assert.equal(transactionIds.size,2);
     await readTransaction(tracked);
+    let terminatedPid;
+    await assert.rejects(readTransaction(async db=>{
+      terminatedPid=(await db.one('SELECT pg_backend_pid() AS pid')).pid;
+      await db.scopeWorkspace(owner.workspaceId,{role:'owner',projects:null});
+      assert.deepEqual(await projectIds(db),[{id:'alpha'},{id:'beta'}]);
+      await db.one('SELECT pg_terminate_backend(pg_backend_pid())');
+    }),error=>['57P01','ECONNRESET'].includes(error.code));
+    await readTransaction(async db=>{
+      assert.notEqual((await db.one('SELECT pg_backend_pid() AS pid')).pid,terminatedPid);
+      assert.deepEqual(await projectIds(db),[]);
+      await db.scopeWorkspace(unrelated,{role:'owner',projects:null});
+      assert.deepEqual(await projectIds(db),[{id:'other'}]);
+    });
     await closeDatabase();
     delete process.env.PROJECTOS_DB_SCOPE_KEY;
     process.env.PROJECTOS_DATABASE_URL=connectionFor(target);

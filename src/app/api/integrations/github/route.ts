@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkOrigin, getCurrentAccount, rateLimit, readLimitedJson } from '@/lib/server/auth';
-import { canSeeProject, projectPolicy, sql, loadRecord, type Account } from '@/lib/server/db';
+import { canSeeProject, projectPolicy, sql, loadRecord, readTransaction, transaction, type Account } from '@/lib/server/db';
 import { apiError, jsonError, noStore } from '@/lib/server/http';
 import { githubBindings, syncRepository, type RepositoryBinding, type RepositorySnapshot } from '@/lib/server/github';
 import { validRecordId } from '@/lib/record-contract';
@@ -11,9 +11,12 @@ export const dynamic = 'force-dynamic';
 function bindings(account: Account) {
   return githubBindings().filter(binding => binding.workspaceId === account.workspaceId);
 }
-async function snapshot(binding: RepositoryBinding) {
-  const row = await sql.one<{status:string;payload:string}>(`SELECT status,payload FROM github_snapshots WHERE workspace_id=?
-    AND project_id=? AND repo=?`, binding.workspaceId, binding.projectId, binding.repository);
+async function snapshot(account: Account, binding: RepositoryBinding) {
+  const row = await readTransaction(async db => {
+    await projectPolicy(db, account);
+    return db.one<{status:string;payload:string}>(`SELECT status,payload FROM github_snapshots WHERE workspace_id=?
+      AND project_id=? AND repo=?`, binding.workspaceId, binding.projectId, binding.repository);
+  });
   if (!row) return;
   return {...JSON.parse(row.payload) as RepositorySnapshot, repository:binding.repository, state:row.status as RepositorySnapshot['state']};
 }
@@ -29,7 +32,7 @@ export async function GET(request: NextRequest) {
   const configured = bindings(account).filter(binding=>projectId===null || binding.projectId===projectId);
   const repositories = await Promise.all(configured.map(async binding => {
     if (!await loadRecord(account, 'projects', binding.projectId)) return;
-    const latest = await snapshot(binding);
+    const latest = await snapshot(account, binding);
     if (!latest) return {repository:binding.repository,projectId:binding.projectId,state:'unknown',checkedAt:null};
     const age = Date.now() - Date.parse(latest.checkedAt);
     const state = latest.state === 'connected' && (!Number.isFinite(age) || age < 0 || age > 15 * 60_000) ? 'stale' : latest.state;
@@ -58,13 +61,16 @@ export async function POST(request: NextRequest) {
   if (!binding || !await loadRecord(account, 'projects', projectId)) return apiError('Not found', 404);
   const limited = await rateLimit('github:sync', JSON.stringify([account.workspaceId,projectId,repository]), 5, 60_000);
   if (!limited.allowed) return apiError('Try again later', 429, {'Retry-After':String(limited.retryAfter)});
-  const previous = await snapshot(binding);
+  const previous = await snapshot(account, binding);
   if (previous?.retryAt && Date.parse(previous.retryAt) > Date.now()) return apiError('Rate limited by GitHub', 429,
     {'Retry-After':String(Math.ceil((Date.parse(previous.retryAt) - Date.now())/1000))});
   const next = await syncRepository(repository, token, fetch, new Date(), backfill===true);
-  await sql.run(`INSERT INTO github_snapshots(workspace_id,project_id,repo,checked_at,status,payload) VALUES(?,?,?,?,?,?)
-    ON CONFLICT(workspace_id,project_id,repo) DO UPDATE SET checked_at=excluded.checked_at,status=excluded.status,payload=excluded.payload
-    WHERE github_snapshots.checked_at<=excluded.checked_at`,
-  account.workspaceId, projectId, repository, next.checkedAt, next.state, JSON.stringify(next));
+  await transaction(async db => {
+    await projectPolicy(db, account);
+    await db.run(`INSERT INTO github_snapshots(workspace_id,project_id,repo,checked_at,status,payload) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(workspace_id,project_id,repo) DO UPDATE SET checked_at=excluded.checked_at,status=excluded.status,payload=excluded.payload
+      WHERE github_snapshots.checked_at<=excluded.checked_at`,
+    account.workspaceId, projectId, repository, next.checkedAt, next.state, JSON.stringify(next));
+  });
   return NextResponse.json({ ...next,projectId }, {headers:noStore});
 }

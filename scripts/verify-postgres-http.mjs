@@ -1,5 +1,5 @@
 import { fork, execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -112,10 +112,11 @@ try {
   } finally { await pgClient.end(); }
   await stopServer();
   const agentToken='synthetic-runtime-monitor-agent-fixture-only';
+  const webhookSecret=randomBytes(32).toString('hex');
   appUrl=await startServer({...env, PROJECTOS_MONITOR_WORKSPACE:workspace,
     PROJECTOS_MONITOR_AGENT_TOKEN:agentToken, PROJECTOS_MONITOR_AGENT_RESOURCES:resource.id,
     PROJECTOS_GITHUB_PROJECTS:JSON.stringify(repositories.map(([projectId,repository])=>({workspaceId:workspace,projectId,repository}))),
-    PROJECTOS_GITHUB_TOKEN:'synthetic-binding-fixture'});
+    PROJECTOS_GITHUB_TOKEN:'synthetic-binding-fixture',PROJECTOS_GITHUB_WEBHOOK_SECRET:webhookSecret});
   headers.Origin=appUrl;
   const observe=(body, token=agentToken)=>fetch(appUrl+'/api/monitoring/observations',{
     method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
@@ -204,6 +205,14 @@ try {
   const denied=await fetch(github,{method:'POST',headers:{...headers,...viewerHeaders},
     body:JSON.stringify({projectId:otherProject.id,repository:'fixture/second',backfill:true})});
   assert.equal(denied.status,403);
+  const githubPayload=JSON.stringify({repository:{full_name:'fixture/second'}});
+  const deliveryHeaders={'Content-Type':'application/json','X-GitHub-Event':'push','X-GitHub-Delivery':randomUUID(),
+    'X-Hub-Signature-256':'sha256='+createHmac('sha256',webhookSecret).update(githubPayload).digest('hex')};
+  const webhook=()=>fetch(github+'/webhook',{method:'POST',headers:deliveryHeaders,body:githubPayload});
+  assert.deepEqual(await (await webhook()).json(),{accepted:1});
+  assert.deepEqual(await (await webhook()).json(),{accepted:0});
+  const refreshed=await (await fetch(github+'?projectId='+otherProject.id,{headers:viewerHeaders})).json();
+  assert.equal(refreshed.repositories[0].state,'pending_refresh');
   const published=await fetch(appUrl+'/api/activity',{method:'POST',headers,
     body:JSON.stringify({projectId:project.id,title:'Verified synthetic activity',detail:'Fixture evidence from the PostgreSQL HTTP run.'})});
   assert.equal(published.status,200);
