@@ -14,7 +14,7 @@ Application API responses containing workspace or authentication data are privat
 | `/api/records/{kind}/{id}` | POST, PUT, DELETE | Bounded record create/replace/delete. `concurrency: "record"` indicates row conflict semantics. Without it, the legacy caller still gets strict workspace revision checks. |
 | `/api/records` | PATCH | Transactional record changes and optional Owner preferences. Errors reject the entire batch. |
 | `/api/docs/history?id=...` | GET | Authorized history, including the project scope of each historical revision. |
-| `/api/activity` | POST | Owner activity for a known project, with quota and pattern guard. |
+| `/api/activity` | GET, POST | GET with `event` reads one authorized audit event. Missing and hidden events return 404. POST writes Owner activity for a known project, with quota and pattern guard. |
 | `/api/team/invitations` | GET, POST, DELETE | Owner invitation list, issue, revoke. `projectIds: null` allows workspace scope. An array defines explicit grants. |
 | `/api/team/members/{id}` | PATCH, DELETE | Owner project grants and membership removal. Revocation takes effect on subsequent requests. |
 | `/api/vault/{id}` | GET, POST | Owner metadata observation. POST requires password and enrolled second factor. |
@@ -22,7 +22,7 @@ Application API responses containing workspace or authentication data are privat
 | `/api/monitoring/observations` | POST | Explicit server-side workspace and resource allowlist, machine credential and bounded observation data. Disk byte counters are optional and must arrive as a valid pair. |
 | `/api/integrations/github` | GET, POST | GET reads a project authorized by `projectId`. The unfiltered read and synchronization are Owner-only. Optional POST `backfill: true` requests at most three pages of activity per collection. |
 | `/api/integrations/github/webhook` | POST | Signed bounded payload and deduplicated delivery for configured mappings. |
-| `/api/assistant` | POST | Permission-aware project sources. External requests require explicit query approval and server opts. Returned model selections must occur verbatim in available sources. |
+| `/api/assistant` | POST | Permission-aware project sources. External requests require explicit query approval and server opts. Returned model selections must occur verbatim in available sources. `{"intent":"resume","projectId":"alpha"}` returns a local summary with dated links to permitted events, project details and an active task when available. |
 | `/api/health` | GET | Readiness status without identifiers or sensitive metadata. |
 
 Vault references may carry an optional `resourceId`. At write time the resource must belong to, or be shared with, the reference project. The record API rejects resource deletion while a Vault reference remains attached. PostgreSQL and SQLite store the optional field in the existing record payload and continue to read earlier references without backfill.

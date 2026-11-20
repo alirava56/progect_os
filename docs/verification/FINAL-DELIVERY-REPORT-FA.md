@@ -16,6 +16,7 @@
 | گزارش دیسک و جزئیات سرور در فاز ۴ | `IMPLEMENTED_AND_VERIFIED` | عامل میزبان با نمونهٔ فایل‌سیستم محلی و HTTPS شبیه‌سازی‌شده آزموده شد. `test:postgres-http` پذیرش عامل، رد مجوز و دادهٔ ناقص و خواندن مجوزمحور را تأیید کرد. Migration 004 و Restore دادهٔ قدیمی و جدید را حفظ کردند. Chrome نمایش درصد تازه و پنهان‌کردن درصد قدیمی را تأیید کرد. |
 | مرور فعالیت و دریافت سابقهٔ GitHub | `IMPLEMENTED_AND_VERIFIED` | مرور Commit، Branch، Pull Request و Issue در صفحهٔ پروژه و نمایش وضعیت قدیمی آزموده شدند. Mock سقف سه صفحه، حذف اقلام تکراری و پالایش پاسخ را بررسی کرد. آزمون HTTP با PostgreSQL خواندن مجاز Viewer و رد همگام‌سازی آن را تأیید کرد. اعتبارسنجی اتصال با حساب بیرونی Staging باز است. |
 | فاکتور، اقساط، ثبت پرداخت و خروجی مالی | `IMPLEMENTED_AND_VERIFIED` | فرم فارسی، ثبت ۱۰۰٫۰۰ دلار در دو قسط، ثبت ۶۰٫۰۰ دلار و ماندهٔ دقیق ۴۰٫۰۰ دلار، رد شناسهٔ تکراری، ابطال فاکتور بدون پرداخت، CSV و محدودیت کاربر خارج از پروژه در Playwright تأیید شدند. Migration 005 و `test:postgres` ثبت هم‌زمان، ارز ناسازگار، اضافه‌پرداخت و جلوگیری از حذف پرداخت را آزمودند. نرخ تبدیل مستند و تطبیق پرداخت با قرارداد همچنان بازند. |
+| ادامهٔ کار پروژه و استناد به رویداد | `IMPLEMENTED_AND_VERIFIED` | API فعالیت اخیر و قدم بعدی ثبت‌شده یا وظیفهٔ قابل پیگیری پروژه را با زمان و لینک برمی‌گرداند. حالت ادامهٔ کار در سرور اجرا می‌شود. آزمون HTTP روی PostgreSQL، نبود ارسال بیرونی، رد پروژه و رویداد غیرمجاز و دسترسی به رویداد از لینک استناد را تأیید کرد. جست‌وجوی معنایی و ارزیابی مدل در حساب Staging بازند. |
 | پذیرش کل فاز ۱ | `PARTIAL` | سناریوهای اصلی ماندگاری و روال‌های جدید سبز هستند. تکمیل پوشش مجموعه‌های تاریخی و یکپارچگی همهٔ فرم‌ها باز است. |
 
 `npm ci --include=optional`، `npm run lint`، `npm run build` با TypeScript، ۴۲ تست هسته و آزمون‌های محلی `test:postgres` و `test:postgres-http` موفق بودند. مجموعهٔ ۲۷‌تایی در Chrome و Firefox سبز شد. WebKit ابتدا یکی از آزمون‌های RTL را با خطای Prefetch هنگام جابه‌جایی اجباری ثبت کرد. آزمون مرور هر مسیر را به سند جدا منتقل کرد و مسیر ۳۹۰ پیکسل در دو اجرای پی‌درپی موفق شد. ۱۳ آزمون تاریخی Workflow همچنان از الگوی دمو استفاده می‌کنند و برای این نسخه تأیید نشده‌اند.
@@ -33,6 +34,8 @@
 Job یکپارچهٔ Migration و بازیابی PostgreSQL 16 پس از اصلاح جریان موفق شد. [CI اصلاح Backup](https://github.com/alirava56/progect_os/actions/runs/44700733566)
 
 نسخهٔ فاکتور Build، TypeScript و ESLint را پاس کرد. `test:smoke` در Chrome با ۳۱/۳۱، `test:core` با ۴۶/۴۶، `test:postgres` با یک نتیجه و `test:postgres-http` با آزمون HTTP روی PostgreSQL 17.12 موفق بودند. فایل‌های اصلی `src/components/invoice-ledger.tsx`، `src/lib/server/db.ts`، `src/lib/server/validation.ts`، `schema/postgres/005_invoice_records.sql` و `tests/release.spec.ts` هستند.
+
+هر چهار Job نسخهٔ مالی روی Windows، Ubuntu، PostgreSQL 16 و CodeQL موفق شدند. [CI فاکتور و پرداخت](https://github.com/alirava56/progect_os/actions/runs/44701353073)
 
 **حکم انتشار Production: NO-GO**
 

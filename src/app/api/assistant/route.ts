@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validRecordId } from '@/lib/record-contract';
 import { checkOrigin, getCurrentAccount, readLimitedJson } from '@/lib/server/auth';
-import { sql } from '@/lib/server/db';
+import { ForbiddenError, sql } from '@/lib/server/db';
 import { apiError, jsonError, noStore } from '@/lib/server/http';
 import { suspiciousCredential } from '@/lib/server/credential-guard';
-import { retrieveMemory, verifyQuotes, type Citation } from '@/lib/server/project-memory';
+import { resumeProject, retrieveMemory, verifyQuotes, type Citation } from '@/lib/server/project-memory';
 import { MissingRecordError } from '@/lib/server/record-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function retrieval(answer: string, citations: Citation[], attempted = false) {
+function retrieval(answer: string, citations: Citation[], attempted = false, mode: 'retrieval' | 'resume' = 'retrieval') {
   return NextResponse.json({
     answer, citations: citations.map(citation => ({...citation, excerpt: citation.excerpt.slice(0, 150)})),
-    mode: 'retrieval', externalTransmission: attempted ? null : false,
+    mode, externalTransmission: attempted ? null : false,
     transmissionStatus: attempted ? 'unknown_after_attempt' : 'not_attempted',
   }, { headers: noStore });
 }
@@ -26,7 +26,21 @@ export async function POST(request: NextRequest) {
   try { input = await readLimitedJson(request, 4000); }
   catch (error) { return jsonError(error); }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return apiError('Invalid body', 400);
-  const { question, projectId, allowExternal } = input as {question?: unknown; projectId?: unknown; allowExternal?: unknown};
+  const { question, projectId, allowExternal, intent } = input as {
+    question?:unknown; projectId?:unknown; allowExternal?:unknown; intent?:unknown;
+  };
+  if (intent!==undefined && intent!=='resume') return apiError('Invalid intent', 422);
+  if (intent==='resume') {
+    if (!validRecordId(projectId)) return apiError('Project required to resume', 422);
+    try {
+      const {answer,citations}=await resumeProject(account,projectId);
+      return retrieval(answer,citations,false,'resume');
+    } catch (error) {
+      if (error instanceof MissingRecordError) return apiError('Not found',404);
+      if (error instanceof ForbiddenError) return apiError('Permission changed',403);
+      return apiError('Project memory unavailable',503);
+    }
+  }
   if (typeof question !== 'string' || question.trim().length < 2 || question.length > 400 || suspiciousCredential(question)
     || (projectId !== undefined && !validRecordId(projectId)) || (allowExternal !== undefined && typeof allowExternal !== 'boolean')) {
     return apiError('Invalid question or project', 422);
@@ -35,9 +49,10 @@ export async function POST(request: NextRequest) {
   try { citations = await retrieveMemory(account, question, projectId); }
   catch (error) {
     if (error instanceof MissingRecordError) return apiError('Not found', 404);
+    if (error instanceof ForbiddenError) return apiError('Permission changed',403);
     return apiError('Project memory unavailable', 503);
   }
-  if (!citations.length) return retrieval('برای این سؤال منبع معتبری در اطلاعات ثبت‌شده پیدا نشد.', []);
+  if (!citations.length) return retrieval('اطلاعات کافی برای پاسخ به این سؤال پیدا نشد.', []);
   const key = process.env.PROJECTOS_OPENAI_API_KEY;
   const model = process.env.PROJECTOS_AI_MODEL;
   if (account.role !== 'owner' || allowExternal !== true || !projectId || !key || !model

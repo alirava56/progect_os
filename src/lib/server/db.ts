@@ -140,6 +140,25 @@ const eventSources: Record<string, string> = {
 type EventRow = Pick<ActivityEvent, 'id' | 'title' | 'projectId' | 'date'> & {
   kind: string; action: string; actorSnapshot: string; fallbackActor: string | null;
 };
+const eventFields=`a.id,a.title,a.project_id AS "projectId",a.kind,a.action,
+  a.created_at AS date,a.actor_snapshot AS "actorSnapshot",u.display_name AS "fallbackActor"`;
+function activityEvent(event:EventRow):ActivityEvent {
+  return {
+    id: event.id, title: redactCredentials(event.title), projectId: event.projectId, date: event.date,
+    actor: redactCredentials(event.actorSnapshot || event.fallbackActor || 'کاربر حذف‌شده'),
+    source: eventSources[event.kind] ?? event.kind,
+    detail: {create: 'ثبت رکورد جدید', update: 'به‌روزرسانی رکورد', delete: 'حذف رکورد'}[event.action] ?? redactCredentials(event.action),
+  };
+}
+export function loadActivityById(account:Account,id:string) {
+  return readTransaction(async db => {
+    const policy=await projectPolicy(db,account);
+    const event=await db.one<EventRow>(`SELECT ${eventFields}
+      FROM audit_events a LEFT JOIN users u ON u.id=a.actor_id
+      WHERE a.workspace_id=? AND a.id=? AND (?=1 OR a.kind<>'secrets')`,account.workspaceId,id,Number(account.role==='owner'));
+    if (event && canSeeProject(policy,event.projectId)) return activityEvent(event);
+  });
+}
 type Member = {id: string; name: string; email: string; role: Account['role']; project_ids: string | null};
 
 export function loadState(account: Account): Promise<{data: DemoData; version: number}> {
@@ -178,17 +197,11 @@ async function readState(db: SqlExecutor, account: Account) {
   const projectCondition = grants
     ? grants.length ? ` AND a.project_id IN (${grants.map(() => '?').join(',')})` : ' AND 1=0'
     : '';
-  const events = await db.all<EventRow>(`SELECT a.id,a.title,a.project_id AS "projectId",a.kind,a.action,
-    a.created_at AS date,a.actor_snapshot AS "actorSnapshot",u.display_name AS "fallbackActor"
+  const events = await db.all<EventRow>(`SELECT ${eventFields}
     FROM audit_events a LEFT JOIN users u ON u.id=a.actor_id
     WHERE a.workspace_id=? AND (?=1 OR a.kind<>'secrets')${projectCondition}
     ORDER BY a.created_at DESC,a.id DESC LIMIT 500`, account.workspaceId, Number(account.role === 'owner'), ...(grants ?? []));
-  data.events = events.map(event => ({
-    id: event.id, title: redactCredentials(event.title), projectId: event.projectId, date: event.date,
-    actor: redactCredentials(event.actorSnapshot || event.fallbackActor || 'کاربر حذف‌شده'),
-    source: eventSources[event.kind] ?? event.kind,
-    detail: {create: 'ثبت رکورد جدید', update: 'به‌روزرسانی رکورد', delete: 'حذف رکورد'}[event.action] ?? redactCredentials(event.action),
-  }));
+  data.events = events.map(activityEvent);
   return { data, version: workspace.version };
 }
 

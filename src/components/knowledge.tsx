@@ -69,8 +69,10 @@ export function Docs() {
 }
 
 type SourceCitation = {id:string;title:string;kind:string;href:string;updatedAt:string|null;excerpt?:string};
-type SearchExchange = {id:string;query:string;answer:string;citations:SourceCitation[];mode:'retrieval'|'llm';externalTransmission:boolean|null;caution?:string};
+type SearchExchange = {id:string;query:string;answer:string;citations:SourceCitation[];mode:'retrieval'|'llm'|'resume';externalTransmission:boolean|null;caution?:string};
 const starterPrompts=['وظایف باز','مستندات پروژه','سرور و دامنه','تمدید'];
+const responseTitles={llm:'پاسخ آزمایشی مدل',retrieval:'نتایج جست‌وجوی مستند',resume:'ادامهٔ کار پروژه'};
+const sourceTitles:Record<string,string>={doc:'سند',task:'وظیفه',project:'پروژه',reminder:'یادآوری',activity:'رویداد'};
 export function Assistant(){
   const {data,projectScope,setProjectScope}=useDemo();
   const [allowExternal,setAllowExternal]=useState(false);
@@ -78,12 +80,13 @@ export function Assistant(){
   const [exchanges,setExchanges]=useState<SearchExchange[]>([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  async function send(text:string){
+  async function send(text:string,intent?:'resume'){
     const value=text.trim();if(!value||busy)return;
     setBusy(true);setError('');
     try{
       const response=await fetch('/api/assistant',{method:'POST',credentials:'same-origin',cache:'no-store',
-        headers:{'Content-Type':'application/json'},body:JSON.stringify({question:value,projectId:projectScope||undefined,allowExternal})});
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(intent==='resume'
+          ? {intent,projectId:projectScope} : {question:value,projectId:projectScope||undefined,allowExternal})});
       const result=await response.json();
       if(!response.ok)throw Error(result.error||'جست‌وجو ناموفق بود');
       setExchanges(previous=>[{id:newId('search'),query:value,answer:result.answer,citations:result.citations||[],
@@ -102,10 +105,10 @@ export function Assistant(){
           {exchanges.length?exchanges.map(msg=><div key={msg.id} className="chat-exchange">
             <div className="chat-user" dir="auto">{msg.query}</div>
             <div className="chat-answer">
-              <strong>{msg.mode==='llm'?'پاسخ آزمایشی مدل':'نتایج جست‌وجوی مستند'}</strong>
+              <strong>{responseTitles[msg.mode]}</strong>
               <p dir="auto" className="document-body">{msg.answer}</p>
               {msg.citations.length?<div className="stack">{msg.citations.map(hit=><Link key={`${hit.kind}:${hit.id}`} href={hit.href} className="item-row item-interactive">
-                <FileText size={15} aria-hidden="true"/><span className="row-copy"><strong>{hit.title}</strong><small>{hit.kind} · {hit.updatedAt?dateLabel(hit.updatedAt):'تاریخ نامشخص'} · {hit.excerpt?.slice(0,100)||''}</small></span><ArrowUpLeft size={14}/>
+                <FileText size={15} aria-hidden="true"/><span className="row-copy"><strong>{hit.title}</strong><small>{sourceTitles[hit.kind] ?? hit.kind} · {hit.updatedAt?<time dateTime={hit.updatedAt}>{dateLabel(hit.updatedAt,{dateStyle:'medium',timeStyle:'short'},data.preferences.zone)}</time>:'تاریخ نامشخص'} · {hit.excerpt?.slice(0,100)||''}</small></span><ArrowUpLeft size={14}/>
               </Link>)}</div>:<p>هیچ منبعی یافت نشد.</p>}
               <p className="muted">{msg.externalTransmission===true?'برای پاسخ، انتقال داده به سرویس AI تلاش شده است.':msg.externalTransmission===false?'در این درخواست تلاشی برای ارسال خارجی انجام نشد.':'وضعیت دریافت داده توسط سرویس خارجی نامشخص است؛ ممکن است ارسال شده باشد.'} {msg.caution||''}</p>
             </div>
@@ -118,6 +121,7 @@ export function Assistant(){
             <option value="">همهٔ پروژه‌های مجاز</option>
             {data.projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}
           </select></Field>
+          {projectScope && <Button disabled={busy} onClick={()=>void send('ادامهٔ کار پروژه','resume')}>ادامهٔ کار این پروژه</Button>}
           {data.users[0]?.role==='Owner'&&projectScope&&<label><input type="checkbox" checked={allowExternal}
             onChange={event=>setAllowExternal(event.currentTarget.checked)} /> اجازهٔ ارسال پرسش و گزیدهٔ منابع این پروژه برای همین پاسخ</label>}
         </div>

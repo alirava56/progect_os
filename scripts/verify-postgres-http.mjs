@@ -62,8 +62,8 @@ try {
   assert.match(cookie,/Secure/i);
   headers.Cookie=cookie.split(';',1)[0];
   const project={id:'http-project',name:'HTTP project',subtitle:'',coverTitle:'HTTP project',description:'',status:'building',
-    type:'Website',progress:0,next:'',art:'navigation/projects'};
-  const otherProject={...project,id:'other-project',name:'Other project'};
+    type:'Website',progress:0,next:'Verify synthetic acceptance data',art:'navigation/projects'};
+  const otherProject={...project,id:'other-project',name:'Other project',next:''};
   const resource={id:'http-server',name:'Synthetic server',projectId:project.id,linkedProjectIds:[],type:'server',
     address:'203.0.113.81',environment:'Development',status:'registered',provider:'Fixture host',tags:[]};
   const change=await fetch(appUrl+'/api/records',{headers,method:'PATCH',body:JSON.stringify({
@@ -142,7 +142,31 @@ try {
   const denied=await fetch(github,{method:'POST',headers:{...headers,...viewerHeaders},
     body:JSON.stringify({projectId:otherProject.id,repository:'fixture/second',backfill:true})});
   assert.equal(denied.status,403);
-  console.log(JSON.stringify({ok:true,mode:'production-build-http-postgresql',machineObservation:'scoped-with-disk',github:'project-scoped'}));
+  const published=await fetch(appUrl+'/api/activity',{method:'POST',headers,
+    body:JSON.stringify({projectId:project.id,title:'Verified synthetic activity',detail:'Fixture evidence from the PostgreSQL HTTP run.'})});
+  assert.equal(published.status,200);
+  const resume=(scope,cookies=headers)=>fetch(appUrl+'/api/assistant',{method:'POST',headers:{...headers,...cookies},
+    body:JSON.stringify({intent:'resume',projectId:scope,allowExternal:true})});
+  const resumed=await resume(project.id);
+  assert.equal(resumed.status,200);
+  const memory=await resumed.json();
+  assert.equal(memory.mode,'resume');
+  assert.equal(memory.externalTransmission,false);
+  assert.ok(memory.answer.includes(project.next));
+  assert.ok(memory.answer.includes('Verified synthetic activity'));
+  const activity=memory.citations.find(item=>item.kind==='activity').href;
+  assert.equal((await fetch(appUrl+activity,{headers})).status,200);
+  const readEvent=await fetch(appUrl+'/api'+activity,{headers});
+  assert.equal(readEvent.status,200);
+  assert.equal((await readEvent.json()).activity.title,'Verified synthetic activity');
+  assert.equal((await fetch(appUrl+'/api'+activity,{headers:viewerHeaders})).status,404);
+  const hiddenPage=await (await fetch(appUrl+activity,{headers:viewerHeaders})).text();
+  assert.ok(hiddenPage.includes('صفحه پیدا نشد'));
+  assert.ok(!hiddenPage.includes('Verified synthetic activity'));
+  assert.equal((await resume(project.id,viewerHeaders)).status,404);
+  assert.equal((await resume(otherProject.id,viewerHeaders)).status,200);
+  console.log(JSON.stringify({ok:true,mode:'production-build-http-postgresql',machineObservation:'scoped-with-disk',
+    github:'project-scoped',memory:'scoped-project-and-activity-citations'}));
 } finally {
   await stopServer();
   if (existed) await admin.query('DROP DATABASE "' + database + '"');

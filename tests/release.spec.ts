@@ -85,6 +85,70 @@ test('project grants govern snapshots, direct record reads, document history and
   } finally { await member.dispose(); }
 });
 
+test('resuming work uses project evidence and refuses unauthorized event citations',async({page,origin,appURL})=>{
+  await bootstrap(page.request,origin);
+  const currentProject={...project('mokmok'),name:'MOKMOK',next:'بازبینی گزارش پرداخت آزمایشی'};
+  const eventTitle='مرور دادهٔ آزمایشی پرداخت';
+  const created=await page.request.patch('/api/records',{headers:origin,data:{version:0,changes:[
+    create('projects',currentProject),create('projects',project('quiet')),create('projects',project('tasks-project')),
+    create('tasks',{...task('open-task','tasks-project'),title:'بررسی رابط ورود',status:'doing'}),
+    create('tasks',{...task('done-task','tasks-project'),title:'بستن درخواست قبلی',status:'done'}),
+  ]}});
+  expect(created.status()).toBe(200);
+  const appended=await page.request.post('/api/activity',{headers:origin,data:{
+    projectId:'mokmok',title:eventTitle,detail:'نمونه‌های مصنوعی در محیط محلی تأیید شدند.',
+  }});
+  expect(appended.status()).toBe(200);
+  const resume=(projectId:string)=>page.request.post('/api/assistant',{headers:origin,data:{intent:'resume',projectId,allowExternal:true}});
+  const available=await resume('mokmok');
+  expect(available.status()).toBe(200);
+  const summary=await available.json();
+  expect(summary.externalTransmission).toBe(false);
+  expect(summary.answer).toContain(currentProject.next);
+  expect(summary.citations.map((citation:{kind:string})=>citation.kind)).toEqual(['activity','project']);
+  expect(summary.citations[0]).toEqual(expect.objectContaining({title:eventTitle,updatedAt:expect.any(String)}));
+  const quiet=await (await resume('quiet')).json();
+  expect(quiet.answer).toContain('اطلاعات کافی');
+  const open=await (await resume('tasks-project')).json();
+  expect(open.answer).toContain('بررسی رابط ورود');
+  expect(open.answer).not.toContain('کار قابل پیگیری «بستن درخواست قبلی»');
+  expect(open.citations.some((citation:{id:string})=>citation.id==='task:open-task')).toBe(true);
+
+  await page.goto('/assistant');
+  await page.getByLabel('پروژهٔ جست‌وجو').selectOption('mokmok');
+  await page.getByRole('button',{name:'ادامهٔ کار این پروژه'}).click();
+  const citation=page.getByRole('link',{name:new RegExp(eventTitle)});
+  await expect(citation.locator('time')).toHaveAttribute('datetime',summary.citations[0].updatedAt);
+  await citation.click();
+  await expect(page).toHaveURL(/\/activity\?event=/);
+  await expect(page.getByRole('heading',{name:'رویداد ارجاع‌شده'})).toBeVisible();
+  await expect(page.getByText('نمونه‌های مصنوعی در محیط محلی تأیید شدند.',{exact:true})).toHaveCount(2);
+  const eventApi='/api'+summary.citations[0].href;
+  const readable=await page.request.get(eventApi);
+  expect(readable.status()).toBe(200);
+  expect((await readable.json()).activity.title).toBe(eventTitle);
+
+  const memberEmail='resume-restricted@example.test';
+  const invitation=await page.request.post('/api/team/invitations',{headers:origin,data:{
+    email:memberEmail,role:'viewer',projectIds:['quiet'],
+  }});
+  expect(invitation.status()).toBe(200);
+  const member=await testRequest(appURL);
+  try {
+    const accepted=await member.post('/api/auth/accept-invite',{headers:origin,data:{
+      token:(await invitation.json()).token,email:memberEmail,password,displayName:'Restricted viewer',
+    }});
+    expect(accepted.status()).toBe(200);
+    expect((await member.post('/api/assistant',{headers:origin,data:{intent:'resume',projectId:'mokmok'}})).status()).toBe(404);
+    expect((await member.get(eventApi)).status()).toBe(404);
+    const hiddenPage=await (await member.get(summary.citations[0].href)).text();
+    expect(hiddenPage).toContain('صفحه پیدا نشد');
+    expect(hiddenPage).not.toContain(eventTitle);
+    expect(hiddenPage).not.toContain('نمونه‌های مصنوعی در محیط محلی تأیید شدند.');
+    expect((await member.post('/api/assistant',{headers:origin,data:{intent:'resume',projectId:'quiet'}})).status()).toBe(200);
+  } finally { await member.dispose(); }
+});
+
 test.describe('required second factor',()=>{
   test.use({enforceMfa:true});
   test('enrollment binds to a session and one-time recovery revokes all older sessions',async({request,origin,appURL})=>{

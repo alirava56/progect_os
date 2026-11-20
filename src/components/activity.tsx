@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { dateLabel, matches } from '@/lib/format';
 import { useDemo } from '@/lib/store';
+import type { ActivityEvent } from '@/lib/types';
 import { ProjectField, ProjectFilter, projectName } from './forms';
 import { Button, Empty, Field, Filter, Heading, Panel, SearchField } from './ui';
 
-export function ActivityLog() {
+export function ActivityLog({selected}:{selected?:ActivityEvent}) {
   const { data, projectScope, setProjectScope } = useDemo();
   const [saving,setSaving]=useState(false);
   const [query,setQuery] = useState('');
@@ -33,6 +35,12 @@ export function ActivityLog() {
 
   return <>
     <Heading title="تاریخچه فعالیت‌ها" subtitle="ردیابی تغییرات فنی، تصمیم‌ها و اقدامات در پروژه‌ها"><a className="button button-primary" href="#new-event"><Plus size={16} aria-hidden="true" />ثبت رویداد جدید</a></Heading>
+    {selected && <Panel title="رویداد ارجاع‌شده" action={<Link href="/activity">همهٔ فعالیت‌ها</Link>}>
+      <strong>{selected.title}</strong><p className="document-body">{selected.detail}</p>
+      <small><bdi>{projectName(data,selected.projectId)}</bdi> · {selected.actor} · <time dateTime={selected.date}>
+        {dateLabel(selected.date,{dateStyle:'medium',timeStyle:'short'},data.preferences.zone)}
+      </time></small>
+    </Panel>}
     <div className="split">
       <Panel title="تایم‌لاین فعالیت‌ها">
         <div className="toolbar"><SearchField label="جست‌وجوی فعالیت" value={query} onChange={setQuery} /><ProjectFilter value={projectScope} onChange={setProjectScope} />
