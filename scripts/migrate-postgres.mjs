@@ -5,6 +5,7 @@ const migrations = [
   ['001_initial', new URL('../schema/postgres/001_initial.sql', import.meta.url)],
   ['002_integrations', new URL('../schema/postgres/002_integrations.sql', import.meta.url)],
   ['003_monitor_metrics', new URL('../schema/postgres/003_monitor_metrics.sql', import.meta.url)],
+  ['004_machine_disk_metrics', new URL('../schema/postgres/004_machine_disk_metrics.sql', import.meta.url)],
 ];
 const client = await getPostgresPool().connect();
 try {

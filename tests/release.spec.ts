@@ -452,3 +452,30 @@ test('alerts preserve independent snoozed, dismissed and resolved states after s
   await expect(alert).toBeVisible();
   expect((await read()).state).toBe('resolved');
 });
+
+test('server details expose real-source measurements and hide stale percentages', async ({page, origin}) => {
+  await bootstrap(page.request,origin);
+  const id='agent-fixture-server';
+  const resource={id,projectId:'agent-fixture',name:'سرور آزمون عامل',linkedProjectIds:[],type:'server',
+    address:'203.0.113.85',environment:'Development',status:'registered',provider:'Fixture host',tags:[]};
+  const seed=await page.request.patch('/api/records',{headers:origin,data:{version:0,changes:[
+    create('projects',project(resource.projectId)),create('resources',resource),
+  ]}});
+  expect(seed.status()).toBe(200);
+  let checkedAt=new Date().toISOString();
+  await page.route(/\/api\/monitoring\?resourceId=agent-fixture-server$/,route=>route.fulfill({json:{
+    observations:[],machineObservations:[{resourceId:id,checkedAt,cpuPercent:25,usedBytes:512,totalBytes:1024,
+      diskUsedBytes:6144,diskTotalBytes:8192,source:'machine-agent',state:'observed'}],
+  }}));
+  await page.goto('/infrastructure/servers/'+id);
+  const metric=(label:string)=>page.locator('.metric').filter({has:page.getByText(label,{exact:true})});
+  await expect(metric('CPU')).toContainText('۲۵٪');
+  await expect(metric('RAM')).toContainText('۵۰٪');
+  await expect(metric('Disk')).toContainText('۷۵٪');
+  await expect(metric('Disk')).toContainText('عامل میزبان');
+  checkedAt=new Date(Date.now()-16*60_000).toISOString();
+  await page.reload();
+  await expect(metric('Disk')).toContainText('مشاهدهٔ قدیمی');
+  await expect(metric('Disk')).toContainText('نامشخص');
+  await expect(metric('Disk')).not.toContainText('۷۵٪');
+});

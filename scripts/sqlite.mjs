@@ -41,6 +41,12 @@ export function openSqlite() {
     addColumn(db, 'delivery_retries', 'lease_token', 'TEXT');
     addColumn(db, 'monitor_observations', 'tls_expires_at', 'TEXT');
     addColumn(db, 'monitor_observations', 'source', "TEXT NOT NULL DEFAULT 'https'");
+    addColumn(db, 'machine_observations', 'disk_used_bytes', 'INTEGER');
+    addColumn(db, 'machine_observations', 'disk_total_bytes', `INTEGER CHECK(
+      (disk_used_bytes IS NULL AND disk_total_bytes IS NULL) OR
+      (disk_used_bytes IS NOT NULL AND disk_total_bytes IS NOT NULL AND
+        disk_used_bytes >= 0 AND disk_total_bytes > 0 AND disk_used_bytes <= disk_total_bytes)
+    )`);
     db.exec('COMMIT');
     return db;
   } catch (error) {

@@ -18,8 +18,8 @@ Application API responses containing workspace or authentication data are privat
 | `/api/team/invitations` | GET, POST, DELETE | Owner invitation list, issue, revoke. `projectIds: null` allows workspace scope. An array defines explicit grants. |
 | `/api/team/members/{id}` | PATCH, DELETE | Owner project grants and membership removal. Revocation takes effect on subsequent requests. |
 | `/api/vault/{id}` | GET, POST | Owner metadata observation. POST requires password and enrolled second factor. |
-| `/api/monitoring` | GET | Project-scoped HTTPS and machine observations, with time and freshness. |
-| `/api/monitoring/observations` | POST | Explicit server-side workspace and resource allowlist, machine credential and bounded observation data. |
+| `/api/monitoring` | GET | Project-scoped HTTPS and machine observations, with time and freshness. Optional `resourceId` selects one authorized resource. |
+| `/api/monitoring/observations` | POST | Explicit server-side workspace and resource allowlist, machine credential and bounded observation data. Disk byte counters are optional and must arrive as a valid pair. |
 | `/api/integrations/github` | GET, POST | Owner snapshot read and explicit read-only synchronization for configured repositories. |
 | `/api/integrations/github/webhook` | POST | Signed bounded payload and deduplicated delivery for configured mappings. |
 | `/api/assistant` | POST | Permission-aware project sources. External requests require explicit query approval and server opts. Returned model selections must occur verbatim in available sources. |

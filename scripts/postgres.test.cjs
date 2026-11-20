@@ -76,6 +76,10 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     const editorId = await acceptInvitation({token:inv.token,email:'postgres-editor@example.test',password,displayName:'Test editor'});
     getDb().prepare('INSERT INTO notification_outbox(id,workspace_id,reminder_id,scheduled_for,channel,state,created_at,delivered_at) VALUES(?,?,?,?,?,?,?,?)')
       .run('outbox-fixture',owner.workspaceId,'reminders:rem','2026-11-18','telegram','delivered',new Date().toISOString(),new Date().toISOString());
+    const observation=getDb().prepare(`INSERT INTO machine_observations(workspace_id,resource_id,checked_at,cpu_percent,used_bytes,total_bytes,
+      disk_used_bytes,disk_total_bytes) VALUES(?,?,?,?,?,?,?,?)`);
+    observation.run(owner.workspaceId,'vps','2026-11-18T10:00:00.000Z',25,512,1024,null,null);
+    observation.run(owner.workspaceId,'vps','2026-11-18T11:00:00.000Z',35,512,1024,6144,8192);
     const before = await loadState(owner);
     run('encrypted-backup.mjs', legacyBackup);
     await closeDatabase();
@@ -84,6 +88,7 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.equal(plan.counts.document_versions, 1);
     assert.equal(plan.counts.notification_outbox, 1);
     assert.equal(plan.counts.memberships, 2);
+    assert.equal(plan.counts.machine_observations, 2);
 
     for (const db of [target, restoreTarget]) {
       await admin.query('CREATE DATABASE "' + db + '"');
@@ -146,6 +151,8 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.equal(current.data.projects.find(item => item.id === 'beta').next, 'independent B');
     assert.equal(current.data.secrets.find(item => item.id === 'ref').resourceId, 'vps');
     assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?','outbox-fixture')).state, 'delivered');
+    const disks=await sql.all('SELECT disk_used_bytes,disk_total_bytes FROM machine_observations WHERE workspace_id=? ORDER BY checked_at',owner.workspaceId);
+    assert.deepEqual(disks,[{disk_used_bytes:null,disk_total_bytes:null},{disk_used_bytes:6144,disk_total_bytes:8192}]);
     const {reconcileReminders,reminderAlertId}=await import('./reminder-scheduler.mjs');
     const scan=clock=>reconcileReminders({clock:new Date(clock),channels:['email'],notificationWorkspace:owner.workspaceId});
     const vps=current.data.resources.find(item=>item.id==='vps');

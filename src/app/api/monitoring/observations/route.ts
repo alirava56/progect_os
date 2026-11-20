@@ -19,14 +19,19 @@ export async function POST(request: NextRequest) {
   let input: unknown;
   try { input = await readLimitedJson(request,2048); }
   catch (error) { return jsonError(error); }
-  const {resourceId,cpuPercent,usedBytes,totalBytes,observedAt} = (input ?? {}) as Record<string,unknown>;
+  const {resourceId,cpuPercent,usedBytes,totalBytes,observedAt,diskUsedBytes,diskTotalBytes} = (input ?? {}) as Record<string,unknown>;
   const stamp = typeof observedAt === 'string' ? Date.parse(observedAt) : NaN;
+  const diskOmitted = diskUsedBytes === undefined && diskTotalBytes === undefined;
+  const diskValid = typeof diskUsedBytes === 'number' && typeof diskTotalBytes === 'number'
+    && Number.isSafeInteger(diskUsedBytes) && Number.isSafeInteger(diskTotalBytes)
+    && diskTotalBytes>0 && diskUsedBytes>=0 && diskUsedBytes<=diskTotalBytes;
   if (!validRecordId(resourceId) || typeof cpuPercent !== 'number' || !Number.isFinite(cpuPercent) || cpuPercent<0 || cpuPercent>100
     || typeof usedBytes!=='number' || typeof totalBytes!=='number' || !Number.isSafeInteger(usedBytes)
     || !Number.isSafeInteger(totalBytes) || totalBytes<1 || usedBytes<0 || usedBytes>totalBytes || !Number.isFinite(stamp)
-    || Math.abs(Date.now()-stamp)>120_000) return apiError('Invalid observation',422);
+    || Math.abs(Date.now()-stamp)>120_000 || (!diskOmitted && !diskValid)) return apiError('Invalid observation',422);
   if (!approved.has(resourceId) || !await storedRecord(sql,workspace,'resources',resourceId)) return apiError('Not found',404);
-  const inserted = await sql.run(`INSERT INTO machine_observations(workspace_id,resource_id,checked_at,cpu_percent,used_bytes,total_bytes)
-    VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING`,workspace,resourceId,new Date(stamp).toISOString(),cpuPercent,usedBytes,totalBytes);
+  const inserted = await sql.run(`INSERT INTO machine_observations(workspace_id,resource_id,checked_at,cpu_percent,used_bytes,total_bytes,disk_used_bytes,disk_total_bytes)
+    VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`,workspace,resourceId,new Date(stamp).toISOString(),cpuPercent,usedBytes,totalBytes,
+    diskValid ? diskUsedBytes : null,diskValid ? diskTotalBytes : null);
   return NextResponse.json({accepted:inserted===1},{headers:noStore});
 }

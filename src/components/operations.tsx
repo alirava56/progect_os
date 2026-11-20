@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { Activity, Bell, Check, CircleAlert, Clock3, Radio } from 'lucide-react';
-import { afterHours, dateLabel, matches, serverHref } from '@/lib/format';
+import { afterHours, dateLabel, matches, resourceHref } from '@/lib/format';
 import { choices, incidentStates, priorities, priorityTones } from '@/lib/labels';
+import { machineObservationFresh, type MachineObservation } from '@/lib/monitoring';
 import { savePreferences, useDemo } from '@/lib/store';
 import type { Incident } from '@/lib/types';
 import { ProjectFilter, projectName } from './forms';
@@ -13,7 +14,7 @@ export function Monitoring() {
   const { data }=useDemo();
   const [query,setQuery]=useState('');
   const [observations,setObservations]=useState<Array<{resourceId:string;checkedAt:string;state:string;statusCode:number|null;latencyMs:number|null;tlsExpiresAt:string|null}>>([]);
-  const [machine,setMachine]=useState<Array<{resourceId:string;checkedAt:string;cpuPercent:number;usedBytes:number;totalBytes:number;state:string}>>([]);
+  const [machine,setMachine]=useState<MachineObservation[]>([]);
   const [monitorStatus,setMonitorStatus]=useState<'loading'|'not_configured'|'configured'|'error'>('loading');
   useEffect(()=>{
     let cancelled=false;
@@ -39,6 +40,7 @@ export function Monitoring() {
     const observation=latest.get(id);
     return observation&&Number.isFinite(Date.parse(observation.checkedAt))&&clock-Date.parse(observation.checkedAt)>=-60_000&&clock-Date.parse(observation.checkedAt)<=15*60*1000&&observation.state!=='stale'?observation:undefined;
   };
+  const stateLabel=(state:string)=>({healthy:'HTTPS پاسخ‌گو',unhealthy:'HTTPS ناموفق',stale:'مشاهدهٔ قدیمی'}[state] ?? 'وضعیت نامشخص');
   const unknown=data.resources.filter(r=>!fresh(r.id)).length;
   const resources=data.resources.filter(r=>matches(query,r.name,r.address,r.provider));
   const expiring=data.resources.filter(r=>r.expires&&Date.parse(r.expires)>=clock&&Date.parse(r.expires)<clock+7*24*60*60*1000);
@@ -53,25 +55,29 @@ export function Monitoring() {
         {label:'هشدار ثبت‌شده',value:data.incidents.filter(i=>i.state==='open').length,note:'باز و نیازمند بررسی',icon:CircleAlert},
       ]}/>
       <Panel title="دارایی‌ها و آخرین وضعیت ثبت‌شده"><SearchField label="جست‌وجوی منبع" value={query} onChange={setQuery}/>
-        {resources.length?resources.map(item=><Row key={item.id} icon={Activity} title={item.name} meta={<bdi dir="ltr">{item.address}</bdi>}
-          href={item.type==='server'?serverHref(item.id):'/infrastructure'} end={fresh(item.id)?
-            <Pill tone={fresh(item.id)?.state==='healthy'?'good':'warn'}>{fresh(item.id)?.state==='healthy'?'HTTPS پاسخ‌گو':fresh(item.id)?.state==='unhealthy'?'HTTPS ناموفق':'وضعیت نامشخص'} · {dateLabel(fresh(item.id)!.checkedAt,{hour:'2-digit',minute:'2-digit'})}</Pill>:
-            <Pill tone="warn">نامشخص · بدون بررسی تازه</Pill>}/>
-):<Empty title="هنوز منبعی ثبت نشده است"/>}
+        {resources.length?resources.map(item=>{
+          const latestCheck=latest.get(item.id);
+          const state=fresh(item.id)?.state ?? (latestCheck ? 'stale' : 'unknown');
+          return <Row key={item.id} icon={Activity} title={item.name} meta={<bdi dir="ltr">{item.address}</bdi>}
+            href={resourceHref(item)} end={<Pill tone={state==='healthy'?'good':'warn'}>
+              {stateLabel(state)}{latestCheck?' · '+dateLabel(latestCheck.checkedAt,{hour:'2-digit',minute:'2-digit'}):''}
+            </Pill>}/>;
+        }):<Empty title="هنوز منبعی ثبت نشده است"/>}
       </Panel>
       <Panel title="آخرین مشاهدات HTTPS">{observations.length?
         <div className="stack">{observations.slice(0,12).map((o,index)=><Row key={`${o.resourceId}-${o.checkedAt}-${index}`} icon={Activity}
           title={data.resources.find(r=>r.id===o.resourceId)?.name??'منبع'}
           meta={<>{dateLabel(o.checkedAt,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · کد {o.statusCode??'نامشخص'} · {o.latencyMs??'—'} ms
             {o.tlsExpiresAt?' · انقضای TLS '+dateLabel(o.tlsExpiresAt):''}</>}
-          end={<Pill tone={o.state==='healthy'?'good':'warn'}>{o.state==='healthy'?'HTTPS پاسخ‌گو':o.state==='unhealthy'?'HTTPS ناموفق':'وضعیت نامشخص'}</Pill>}/>)}</div>:
+          end={<Pill tone={o.state==='healthy'?'good':'warn'}>{stateLabel(o.state)}</Pill>}/>)}</div>:
         <Empty title="هنوز مشاهده‌ای ثبت نشده" detail="در صورت فعال‌سازی میزبان‌های مجاز و اجرای Worker، نتایج HTTPS در اینجا نمایش داده می‌شوند."/>}</Panel>
       <Panel title="آخرین گزارش‌های عامل میزبان">
         {machine.length?machine.slice(0,10).map(o=><Row key={o.resourceId+o.checkedAt} icon={Activity}
           title={data.resources.find(r=>r.id===o.resourceId)?.name??'منبع'}
           meta={dateLabel(o.checkedAt,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+' · عامل میزبان'}
-          end={o.state==='observed'&&clock-Date.parse(o.checkedAt)<=900_000
-            ? <Pill>CPU {Math.round(o.cpuPercent)}٪ · RAM {Math.round(o.usedBytes/o.totalBytes*100)}٪</Pill>
+          end={o.state==='observed'&&machineObservationFresh(o.checkedAt,clock)
+            ? <Pill>CPU {Math.round(o.cpuPercent)}٪ · RAM {Math.round(o.usedBytes/o.totalBytes*100)}٪
+              {o.diskUsedBytes!==null&&o.diskTotalBytes!==null ? ` · Disk ${Math.round(o.diskUsedBytes/o.diskTotalBytes*100)}٪` : ''}</Pill>
             : <Pill tone="warn">گزارش قدیمی</Pill>}/>) : <Empty title="گزارشی از عامل میزبان دریافت نشده" />}
       </Panel>
     </div>

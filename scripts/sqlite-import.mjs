@@ -22,7 +22,7 @@ const tables = [
   ['vault_checks',['workspace_id','ref_id'],'workspace_id ref_id reference_version checked_at status provider_version'],
   ['github_snapshots',['workspace_id','project_id','repo'],'workspace_id project_id repo checked_at status payload'],
   ['github_deliveries',['workspace_id','project_id','repo','delivery_id'],'workspace_id project_id repo delivery_id payload_hash event_type received_at'],
-  ['machine_observations',['workspace_id','resource_id','checked_at'],'workspace_id resource_id checked_at cpu_percent used_bytes total_bytes'],
+  ['machine_observations',['workspace_id','resource_id','checked_at'],'workspace_id resource_id checked_at cpu_percent used_bytes total_bytes disk_used_bytes disk_total_bytes'],
   ['worker_heartbeats', ['name'], 'name checked_at'],
 ].map(([name, order, columns]) => ({ name, order, columns: columns.split(' ') }));
 
@@ -36,6 +36,7 @@ const defaults = {
   failed_logins: 0, locked_until: 0, mfa_seed: null, mfa_pending: null, mfa_pending_session: null, mfa_pending_until: 0,
   mfa_last_step: -1, mfa_failed: 0, mfa_locked_until: 0, project_ids: null, record_version: 0, actor_snapshot: '',
   lease_token: null, source: 'https', tls_expires_at: null,
+  disk_used_bytes: null, disk_total_bytes: null,
 };
 const mandatory = new Set(['users','workspaces','memberships','records','sessions','document_versions','audit_events','notification_outbox']);
 
@@ -99,7 +100,11 @@ function *rows(snapshot, table) {
 }
 
 function newDigest() { return createHash('sha256'); }
-function add(digest, values) { digest.update(JSON.stringify(values) + '\n'); }
+function add(digest, table, values) {
+  // Rows without disk samples keep their earlier import digest and can be retried.
+  const legacy = table.name === 'machine_observations' && values.at(-2) === null && values.at(-1) === null;
+  digest.update(JSON.stringify(legacy ? values.slice(0,-2) : values) + '\n');
+}
 
 export function manifest(snapshot) {
   const counts = {};
@@ -108,7 +113,7 @@ export function manifest(snapshot) {
     digest.update(table.name + '\n');
     let count = 0;
     for (const values of rows(snapshot, table)) {
-      add(digest, values);
+      add(digest, table, values);
       count++;
     }
     counts[table.name] = count;
@@ -148,7 +153,7 @@ async function targetManifest(client) {
     while (true) {
       const result = await client.query('SELECT ' + table.columns.join(',') + ' FROM ' + table.name
         + ' ORDER BY ' + order + ' LIMIT 100 OFFSET $1', [cursor]);
-      for (const row of result.rows) add(digest, projectRow(table, row));
+      for (const row of result.rows) add(digest, table, projectRow(table, row));
       cursor += result.rowCount;
       if (result.rowCount < 100) break;
     }

@@ -732,6 +732,28 @@ test('HTTPS monitor declines private DNS answers before opening a connection',as
   assert.equal(attempted,false);
 });
 
+test('machine agent samples an opted-in filesystem and sends only byte counters to its HTTPS endpoint', () => {
+  const agent=pathToFileURL(path.join(__dirname,'report-monitor-agent.mjs')).href;
+  const env={...process.env,PROJECTOS_AGENT_TARGET:'https://agent.example.test/api/monitoring/observations',
+    PROJECTOS_MONITOR_AGENT_TOKEN:'synthetic-monitor-only-fixture',PROJECTOS_AGENT_RESOURCE_ID:'fixture-server',
+    PROJECTOS_AGENT_DISK_PATH:temp};
+  const output=execFileSync(process.execPath,['--input-type=module','-e',`
+    import assert from 'node:assert/strict';
+    globalThis.fetch=async (url,options)=>{
+      assert.equal(url.href,process.env.PROJECTOS_AGENT_TARGET);
+      assert.equal(options.redirect,'error');
+      const body=JSON.parse(options.body);
+      assert.equal(body.resourceId,'fixture-server');
+      assert.ok(Number.isSafeInteger(body.diskUsedBytes) && body.diskUsedBytes>=0);
+      assert.ok(Number.isSafeInteger(body.diskTotalBytes) && body.diskTotalBytes>0 && body.diskUsedBytes<=body.diskTotalBytes);
+      assert.equal(options.body.includes(process.env.PROJECTOS_AGENT_DISK_PATH),false);
+      return Response.json({accepted:true});
+    };
+    await import(process.argv[1]);
+  `,agent],{env,encoding:'utf8',timeout:12_000});
+  assert.match(output,/Authenticated machine observation submitted/);
+});
+
 test('multi-currency totals have exact minor units and CSV neutralizes spreadsheet formulas',()=>{
   const {parseAmount,totalsByCurrency}=require('../src/lib/money.ts');
   const {csv}=require('../src/lib/format.ts');

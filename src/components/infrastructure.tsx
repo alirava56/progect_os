@@ -3,9 +3,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArchiveRestore, CircleAlert, Clock3, Cpu, Database, FileText, Globe2, HardDrive, KeyRound, MemoryStick, Network, Pencil, Plus, Server, ShieldCheck } from 'lucide-react';
-import { dateLabel, docHref, matches, newId, number, projectHref, resourceHref } from '@/lib/format';
+import { ArchiveRestore, CircleAlert, Cpu, Database, FileText, Globe2, HardDrive, KeyRound, MemoryStick, Network, Pencil, Plus, Server, ShieldCheck } from 'lucide-react';
+import { dateLabel, docHref, matches, newId, number, percent, projectHref, resourceHref } from '@/lib/format';
 import { amountLabel } from '@/lib/money';
+import { machineObservationFresh, type MachineObservation } from '@/lib/monitoring';
 import { choices, resourceStatuses, resourceTones, resourceTypes } from '@/lib/labels';
 import { useDemo } from '@/lib/store';
 import type { Resource, SecretReference } from '@/lib/types';
@@ -164,6 +165,35 @@ function VaultMetadata({reference}:{reference:SecretReference}){
   </div>;
 }
 
+function ServerMachineMetrics({server}: {server:Resource}) {
+  const [observation,setObservation]=useState<MachineObservation|null>();
+  const [clock,setClock]=useState(()=>Date.now());
+  useEffect(()=>{
+    const controller=new AbortController();
+    fetch('/api/monitoring?resourceId='+encodeURIComponent(server.id),{cache:'no-store',signal:controller.signal})
+      .then(async response=>{
+        if (!response.ok) throw new Error('Metrics unavailable');
+        const payload=await response.json() as {machineObservations:MachineObservation[]};
+        if (!controller.signal.aborted) setObservation(payload.machineObservations[0] ?? null);
+      }).catch(()=>{if (!controller.signal.aborted) setObservation(null);});
+    const timer=setInterval(()=>setClock(Date.now()),30_000);
+    return ()=>{controller.abort();clearInterval(timer);};
+  },[server.id]);
+  const fresh=observation && observation.state==='observed' && machineObservationFresh(observation.checkedAt,clock)
+    ? observation : undefined;
+  const note=observation
+    ? `${fresh ? 'عامل میزبان' : 'مشاهدهٔ قدیمی'} · ${dateLabel(observation.checkedAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
+    : observation===undefined ? 'در حال دریافت' : 'مشاهده‌ای در دسترس نیست';
+  const disk=fresh && fresh.diskUsedBytes!==null && fresh.diskTotalBytes!==null
+    ? percent(Math.round(fresh.diskUsedBytes/fresh.diskTotalBytes*100)) : 'نامشخص';
+  return <Metrics entries={[
+    {label:'وضعیت ثبت',value:resourceStatuses[server.status],note:'وضعیت ثبت دستی',icon:Server},
+    {label:'CPU',value:fresh ? percent(Math.round(fresh.cpuPercent)) : 'نامشخص',note,icon:Cpu},
+    {label:'RAM',value:fresh ? percent(Math.round(fresh.usedBytes/fresh.totalBytes*100)) : 'نامشخص',note,icon:MemoryStick},
+    {label:'Disk',value:disk,note,icon:HardDrive},
+  ]}/>;
+}
+
 export function ServerDetails({ id }: { id: string }) {
   const { data } = useDemo();
   const [editing, setEditing] = useState(false);
@@ -179,12 +209,7 @@ export function ServerDetails({ id }: { id: string }) {
       <Button variant="primary" icon={Pencil} onClick={() => setEditing(true)}>ویرایش سرور</Button>
     </Heading>
     <div className="stack">
-      <Metrics entries={[
-        {label:'وضعیت ثبت',value:resourceStatuses[server.status],note:'وضعیت ثبت دستی',icon:Server},
-        {label:'CPU',value:'نامشخص',note:'Probe متصل نیست',icon:Cpu},
-        {label:'RAM',value:'نامشخص',note:'Probe متصل نیست',icon:MemoryStick},
-        {label:'آخرین بررسی',value:'نامشخص',note:'نیازمند اتصال پایش',icon:Clock3},
-      ]} />
+      <ServerMachineMetrics key={id} server={server} />
       <div className="split">
         <Panel title="مشخصات سرور" action={<Pill><bdi>{server.environment}</bdi></Pill>} className="stack">
           <div className="resource-banner"><Art name="infrastructure/server-rack" size={72} /><div><strong dir="auto">{server.name}</strong><small>مشخصات ثبت‌شده · تأیید نشده</small></div></div>

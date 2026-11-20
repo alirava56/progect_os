@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { cpus, freemem, totalmem } from 'node:os';
+import { statfs } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 
 function captureCpu() {
@@ -9,6 +10,18 @@ function captureCpu() {
     total += Object.values(cpu.times).reduce((a,b)=>a+b,0);
   }
   return { idle, total };
+}
+
+async function captureDisk(path) {
+  if (!path) return {};
+  try {
+    const {blocks,bsize,bfree}=await statfs(path,{bigint:true});
+    const total=blocks*bsize, used=(blocks-bfree)*bsize;
+    if (total > BigInt(Number.MAX_SAFE_INTEGER) || total<=0n || used<0n || used>total) return {};
+    return {diskTotalBytes:Number(total),diskUsedBytes:Number(used)};
+  } catch {
+    return {};
+  }
 }
 try {
   const endpoint = new URL(process.env.PROJECTOS_AGENT_TARGET);
@@ -23,10 +36,11 @@ try {
   if (elapsed <= 0) throw new Error('CPU sample unavailable');
   const cpuPercent = Math.max(0,Math.min(100,(1-(after.idle-before.idle)/elapsed)*100));
   const totalBytes = totalmem();
+  const disk=await captureDisk(process.env.PROJECTOS_AGENT_DISK_PATH);
   const result = await fetch(endpoint,{
     method:'POST',redirect:'error',signal:AbortSignal.timeout(7000),
     headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
-    body:JSON.stringify({ resourceId,cpuPercent,totalBytes,usedBytes:totalBytes-freemem(),observedAt:new Date().toISOString() }),
+    body:JSON.stringify({ resourceId,cpuPercent,totalBytes,usedBytes:totalBytes-freemem(),...disk,observedAt:new Date().toISOString() }),
   });
   if (!result.ok) throw new Error('Observation rejected');
   console.log('Authenticated machine observation submitted');
