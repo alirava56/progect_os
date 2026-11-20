@@ -2,7 +2,8 @@
 const {test,after}=require('node:test');
 const assert=require('node:assert/strict');
 const os=require('node:os'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const {execFileSync}=require('node:child_process');
+const {execFileSync,spawnSync}=require('node:child_process');
+const {pathToFileURL}=require('node:url');
 const ts=require('typescript');
 // Exercise TypeScript domain modules without introducing an extra runtime dependency in the offline audit environment.
 require.extensions['.ts']=(mod,file)=>{
@@ -587,6 +588,99 @@ test('expired notification lease can be reclaimed and a stale worker cannot fina
   assert.equal(await finishDelivery(acquired,true,now+120002),false);
   assert.equal(await finishDelivery(recovered,true,now+120002),true);
   assert.equal(getDb().prepare('SELECT state FROM notification_outbox WHERE id=?').get(id).state,'delivered');
+});
+
+test('a VPS renewal retires its queued alert after a worker crash and delivers only the new deadline', async () => {
+  const {commitRecordChanges}=require('../src/lib/server/record-service.ts');
+  const {reconcileReminders,reminderAlertId}=await import('./reminder-scheduler.mjs');
+  const {claimDelivery,finishDelivery,deliverNotifications}=await import('./notification-delivery.mjs');
+  const {closeDatabase}=await import('./database.mjs');
+  const {accountByUser}=require('../src/lib/server/db.ts');
+  const original=process.env.PROJECTOS_DB_PATH;
+  await closeDatabase();
+  process.env.PROJECTOS_DB_PATH=path.join(temp,'renewal-workflow.sqlite');
+  try {
+    const user=await setupOwner({setupToken:process.env.PROJECTOS_SETUP_TOKEN,email:'renewal@example.test',
+      password:'synthetic-renewal-owner-password',displayName:'Renewal fixture',workspace:'Renewal fixture'});
+    const owner=await accountByUser(user);
+    assert.ok(owner);
+    const current=await loadState(owner);
+    const projectId='renewal-workflow-project',
+      resource={id:'renewal-workflow-vps',name:'Synthetic VPS',projectId,linkedProjectIds:[],type:'server',
+        address:'203.0.113.80',environment:'Development',status:'registered',provider:'Fixture host',tags:[],
+        expires:'2031-03-04',noticeDays:2};
+    const create=(kind,record)=>({kind,id:record.id,action:'create',record});
+    await commitRecordChanges(owner,current.version,[create('projects',project(projectId)),create('resources',resource)],
+      {...current.data.preferences,zone:'UTC',renewal:true,digest:false});
+    const scan=day=>reconcileReminders({clock:new Date(day+'T10:00:00Z'),channels:['email'],
+      notificationWorkspace:owner.workspaceId,offsets:[14,7,3,1,0]});
+    const alertId=(item)=>reminderAlertId(owner.workspaceId,'تمدید',item.id,item.expires,'resources');
+    const outbox=id=>getDb().prepare('SELECT state,scheduled_for FROM notification_outbox WHERE id=? AND workspace_id=?')
+      .get(id,owner.workspaceId);
+    const expired=alertId(resource), expiredEmail='email-'+expired;
+    await scan('2031-03-01');
+    assert.equal(outbox(expiredEmail),undefined,'Third day before due is earlier than the selected two-day notice');
+    await scan('2031-03-02');
+    assert.equal(outbox(expiredEmail).state,'pending');
+    assert.equal(outbox(expired).state,'available');
+
+    const now=Date.parse('2031-03-02T10:01:00Z');
+    const entry=pathToFileURL(path.join(__dirname,'notification-delivery.mjs')).href;
+    const crashed=spawnSync(process.execPath,['--input-type=module','-e',`
+      const {claimDelivery}=await import(process.argv[1]);
+      const job=await claimDelivery(process.argv[2],'email',Number(process.argv[3]));
+      process.stdout.write(JSON.stringify(job),()=>process.exit(27));
+    `,entry,owner.workspaceId,String(now)],{env:process.env,encoding:'utf8',timeout:15_000});
+    assert.equal(crashed.status,27);
+    const stale=JSON.parse(crashed.stdout);
+    assert.equal(stale.id,expiredEmail);
+    assert.equal(outbox(expiredEmail).state,'sending');
+    assert.equal(await claimDelivery(owner.workspaceId,'email',now+1000),undefined);
+
+    const moved={...resource,expires:'2031-03-05'};
+    const latest=await loadState(owner);
+    for (const invalid of [1.25,61,-1,'2']) {
+      await assert.rejects(commitRecordChanges(owner,latest.version,[{
+        kind:'resources',id:resource.id,action:'replace',record:{...moved,noticeDays:invalid},
+      }]),ValidationError);
+    }
+    await commitRecordChanges(owner,latest.version,[{kind:'resources',id:resource.id,action:'replace',record:moved}]);
+    assert.equal(outbox(expiredEmail).state,'cancelled','Date change must retire the old job before the scheduler reruns');
+    assert.equal(outbox(expired).state,'cancelled');
+    assert.equal((await loadState(owner)).data.incidents.some(item=>item.id===expired),false);
+    assert.equal(await claimDelivery(owner.workspaceId,'email',now+120001),undefined);
+    assert.equal(await finishDelivery(stale,true,now+120002),false);
+
+    const newAlert=alertId(moved),newEmail='email-'+newAlert;
+    await scan('2031-03-02');
+    assert.equal(outbox(newEmail),undefined);
+    await scan('2031-03-03');
+    assert.equal(outbox(newEmail).state,'pending');
+    const providerCalls=[];
+    const mock={email:async job=>{providerCalls.push([job.id,job.scheduled_for]);return true;}};
+    assert.equal((await deliverNotifications(owner.workspaceId,mock)).accepted,1);
+    await scan('2031-03-03');
+    assert.equal((await deliverNotifications(owner.workspaceId,mock)).accepted,0);
+    assert.deepEqual(providerCalls,[[newEmail,moved.expires]]);
+    assert.equal(outbox(newEmail).state,'delivered');
+
+    const deadline={...task('explicit-task-deadline',projectId),due:'2031-03-05',noticeDays:2};
+    const unconfigured={...task('unconfigured-task-deadline',projectId),due:deadline.due};
+    await commitRecordChanges(owner,(await loadState(owner)).version,[create('tasks',deadline),create('tasks',unconfigured)]);
+    await scan('2031-03-03');
+    const taskAlert=reminderAlertId(owner.workspaceId,'یادآوری',deadline.id,deadline.due,'tasks');
+    const implicit=reminderAlertId(owner.workspaceId,'یادآوری',unconfigured.id,unconfigured.due,'tasks');
+    assert.equal(outbox(taskAlert).state,'available');
+    assert.equal(outbox(implicit),undefined);
+    await commitRecordChanges(owner,(await loadState(owner)).version,[{
+      kind:'tasks',id:deadline.id,action:'replace',record:{...deadline,status:'done'},
+    }]);
+    assert.equal(outbox('email-'+taskAlert).state,'cancelled');
+    assert.equal(outbox(taskAlert).state,'cancelled');
+  } finally {
+    await closeDatabase();
+    process.env.PROJECTOS_DB_PATH=original;
+  }
 });
 
 test('Vault metadata probe uses the approved metadata path and discards provider data',async ()=>{

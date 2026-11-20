@@ -28,6 +28,7 @@ export interface Task {
   priority: Priority;
   owner: string;
   due: string;
+  noticeDays?: number;
   description: string;
   checklist: { label: string; checked: boolean }[];
   comments: { text: string; date: string }[];
@@ -46,6 +47,7 @@ export interface Resource {
   os?: string;
   port?: number;
   expires?: string;
+  noticeDays?: number;
   parentId?: string;
   tags: string[];
   linkedProjectIds?: string[];
@@ -65,7 +67,7 @@ export interface SecretReference {
 }
 export interface Reminder {
   id: string; title: string; projectId: string; due: string; kind: 'جلسه' | 'تمدید' | 'یادآوری';
-  repeat?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'; zone?: string; paused?: boolean;
+  repeat?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'; zone?: string; paused?: boolean; noticeDays?: number;
 }
 export interface Incident {
   id: string;
@@ -74,7 +76,7 @@ export interface Incident {
   priority: Priority;
   source: string;
   date: string;
-  state: 'open' | 'acknowledged' | 'snoozed';
+  state: 'open' | 'acknowledged' | 'snoozed' | 'resolved' | 'dismissed';
   snoozedUntil?: string;
 }
 export interface Expense {

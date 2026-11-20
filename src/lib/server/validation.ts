@@ -10,13 +10,13 @@ const n=(max=1e12,optional=false):Rule=>({type:'number',max,optional});
 const str=(max=30):Rule=>({type:'strings',max});
 const ruleSets={
   projects:{id:s(100),name:s(100),subtitle:s(150),coverTitle:s(150),description:s(4000),status:s(30,false,['building','review','active','archived']),archivedFrom:s(30,true,['building','review','active']),type:s(70),progress:n(100),next:s(400),art:s(100)},
-  tasks:{id:s(100),title:s(200),projectId:s(100),status:s(20,false,['todo','doing','blocked','review','done']),priority:s(20,false,['low','medium','high']),owner:s(100),due:s(32),description:s(10000),checklist:{type:'checklist',max:200},comments:{type:'comments',max:500},dependencies:str(80)},
-  resources:{id:s(100),name:s(160),projectId:s(100),type:s(24,false,['server','domain','database','service']),address:s(350),environment:s(50,false,['Production','Staging','Development']),status:s(25,false,['registered','review','missing']),provider:s(160),region:s(120,true),os:s(120,true),port:n(65535,true),expires:s(32,true),parentId:s(100,true),tags:str(20),linkedProjectIds:str(100)},
+  tasks:{id:s(100),title:s(200),projectId:s(100),status:s(20,false,['todo','doing','blocked','review','done']),priority:s(20,false,['low','medium','high']),owner:s(100),due:s(32),noticeDays:n(60,true),description:s(10000),checklist:{type:'checklist',max:200},comments:{type:'comments',max:500},dependencies:str(80)},
+  resources:{id:s(100),name:s(160),projectId:s(100),type:s(24,false,['server','domain','database','service']),address:s(350),environment:s(50,false,['Production','Staging','Development']),status:s(25,false,['registered','review','missing']),provider:s(160),region:s(120,true),os:s(120,true),port:n(65535,true),expires:s(32,true),noticeDays:n(60,true),parentId:s(100,true),tags:str(20),linkedProjectIds:str(100)},
   secrets:{id:s(100),name:s(160),projectId:s(100),resourceId:s(100,true),type:s(30,false,['SSH Key','API Token','Account','DB Credential']),
     vaultProvider:s(160),lastCheckedAt:s(32,true),externalRef:s(500,true),vaultMount:s(80,true),vaultPath:s(240,true),rotationDue:s(32,true)},
   reminders:{id:s(100),title:s(180),projectId:s(100),due:s(32),kind:s(20,false,['جلسه','تمدید','یادآوری']),
-    repeat:s(20,true,['none','daily','weekly','monthly','yearly']),zone:s(100,true),paused:{type:'boolean',optional:true}},
-  incidents:{id:s(100),title:s(200),projectId:s(100),priority:s(20,false,['high','medium','low']),source:s(140),date:s(32),state:s(20,false,['open','acknowledged','snoozed']),snoozedUntil:s(32,true)},
+    repeat:s(20,true,['none','daily','weekly','monthly','yearly']),zone:s(100,true),noticeDays:n(60,true),paused:{type:'boolean',optional:true}},
+  incidents:{id:s(100),title:s(200),projectId:s(100),priority:s(20,false,['high','medium','low']),source:s(140),date:s(32),state:s(20,false,['open','acknowledged','snoozed','resolved','dismissed']),snoozedUntil:s(32,true)},
   expenses:{id:s(100),title:s(160),projectId:s(100),category:s(30,false,['زیرساخت','دامنه','پشتیبان‌گیری','اشتراک']),amount:n(1e12),currency:s(10,true,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),date:s(32),status:s(20,false,['paid','upcoming'])},
   charges:{id:s(100),projectId:s(100),title:s(160),provider:s(120),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),period:s(20,false,['monthly','quarterly','yearly']),nextDue:s(32),status:s(15,false,['active','paused']),linkedResourceId:s(100,true)},
   contracts:{id:s(100),projectId:s(100),title:s(160),client:s(160),start:s(32),end:s(32),amount:n(1e12),currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,true,['minor']),state:s(15,false,['draft','active','completed'])},
@@ -72,6 +72,7 @@ export function parseRecord<Kind extends Collection>(kind: Kind, item: unknown):
     if (field !== undefined) clean[key] = field;
   }
   if (!validRecordId(clean.id)) bad('Invalid record id');
+  if (clean.noticeDays !== undefined && !Number.isSafeInteger(clean.noticeDays)) bad('Invalid notification lead days');
   if (suspiciousInRecord(clean)) bad('Possible credential in unencrypted workspace field. Store it in your external vault instead.');
   switch (kind) {
     case 'tasks': checkDate(clean.due); break;
@@ -85,6 +86,7 @@ export function parseRecord<Kind extends Collection>(kind: Kind, item: unknown):
     case 'resources':
       checkAddress(clean.address as string);
       if (clean.expires) checkDate(clean.expires);
+      else if (clean.noticeDays !== undefined) bad('Renewal notice requires a due date');
       if (clean.port !== undefined && (!Number.isInteger(clean.port) || Number(clean.port) < 1)) bad('Invalid resource port');
       break;
     case 'incidents':

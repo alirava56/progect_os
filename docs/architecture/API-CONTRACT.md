@@ -27,6 +27,8 @@ Application API responses containing workspace or authentication data are privat
 
 Vault references may carry an optional `resourceId`. At write time the resource must belong to, or be shared with, the reference project. The record API rejects resource deletion while a Vault reference remains attached. PostgreSQL and SQLite store the optional field in the existing record payload and continue to read earlier references without backfill.
 
+Resources, tasks and reminders accept optional `noticeDays` values from 0 through 60. A resource needs a renewal date when this value is set. Setting a task's lead time opts that task into the deadline scheduler. Older payloads retain their existing schedule semantics without a backfill. The alert states also include `dismissed` and `resolved`.
+
 Example request with the latest usable Workspace watermark.
 
 ```json

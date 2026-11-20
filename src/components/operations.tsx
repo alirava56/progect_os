@@ -85,24 +85,32 @@ const rules = [
   { key:'digest',title:'خلاصه روزانه',detail:'ترجیح نمایشی فضای کاری'},
 ] as const;
 
+const alertMessages: Record<Incident['state'], string> = {
+  open:'هشدار دوباره باز شد.', acknowledged:'رسیدگی به هشدار ثبت شد.', snoozed:'هشدار ۲۴ ساعت به تعویق افتاد.',
+  resolved:'هشدار حل شد.', dismissed:'هشدار کنار گذاشته شد.',
+};
+
 export function Alerts() {
-  const { data, projectScope, setProjectScope, change } = useDemo();
+  const { data, projectScope, setProjectScope, change, saving } = useDemo();
   const [filter,setFilter] = useState('open');
   const [priority,setPriority] = useState('');
   const [query,setQuery] = useState('');
   const [selected,setSelected] = useState<string>();
+  const [alertError,setAlertError] = useState('');
   const [config,setConfig] = useState(false);
   const scoped = data.incidents.filter(a => !projectScope || a.projectId === projectScope);
   const open = scoped.filter(a => a.state === 'open');
   const items = scoped.filter(a => (!filter || a.state === filter) && (!priority || a.priority === priority) && matches(query,a.title,a.source));
   const alert = data.incidents.find(a => a.id === selected);
 
-  function updateState(next: Incident['state']) {
+  async function updateState(next: Incident['state']) {
     if (!alert) return;
     const snoozedUntil = next === 'snoozed' ? afterHours(24) : undefined;
-    const action = next === 'snoozed' ? 'هشدار ۲۴ ساعت به تعویق افتاد.' : next === 'acknowledged' ? 'رسیدگی به هشدار ثبت شد.' : 'هشدار دوباره باز شد.';
-    change(previous => ({...previous,incidents:previous.incidents.map(a => a.id === alert.id ? {...a,state:next,snoozedUntil} : a)}),
+    const action = alertMessages[next];
+    setAlertError('');
+    const saved = await change(previous => ({...previous,incidents:previous.incidents.map(a => a.id === alert.id ? {...a,state:next,snoozedUntil} : a)}),
       action,{projectId:alert.projectId,title:action,source:'هشدارها',detail:alert.title});
+    if (!saved) { setAlertError('ذخیرهٔ وضعیت هشدار تأیید نشد.'); return; }
     setSelected(undefined);
   }
 
@@ -133,19 +141,24 @@ export function Alerts() {
             <Filter label="اولویت هشدار" value={priority} onChange={setPriority} options={[{value:'',label:'همه اولویت‌ها'},...choices(priorities)]} />
           </div>
           {items.length ? items.map(a => <Row key={a.id} icon={Bell} title={a.title} meta={<>{projectName(data,a.projectId)} · {a.source} · {dateLabel(a.date)}</>}
-            end={<Pill tone={priorityTones[a.priority]}>{priorities[a.priority]}</Pill>} onClick={() => setSelected(a.id)} />) : <Empty title="هشداری با این فیلترها پیدا نشد" />}
+            end={<Pill tone={priorityTones[a.priority]}>{priorities[a.priority]}</Pill>} onClick={() => {setAlertError('');setSelected(a.id);}} />) : <Empty title="هشداری با این فیلترها پیدا نشد" />}
         </Panel>
-        <Panel title="تنظیمات یادآوری">{settings()}<p className="muted mt-3">تنظیمات ذخیره می‌شوند؛ ارسال تلگرام فقط با پیکربندی و اجرای Worker مستقل انجام می‌شود. ایمیل هنوز پیاده‌سازی نشده است.</p></Panel>
+        <Panel title="تنظیمات یادآوری">{settings()}<p className="muted mt-3">ارسال تلگرام و ایمیل به تنظیم ارائه‌دهنده و اجرای Worker نیاز دارد.</p></Panel>
       </div>
     </div>
     {alert && <Modal title="بررسی هشدار" onClose={() => setSelected(undefined)}><div className="form-stack">
       <Row icon={Bell} title={alert.title} meta={<>{projectName(data,alert.projectId)} · {alert.source}</>} end={<Pill tone={priorityTones[alert.priority]}>{priorities[alert.priority]}</Pill>} />
       <p className="muted">وضعیت: {incidentStates[alert.state]}{alert.snoozedUntil && ` · تا ${dateLabel(alert.snoozedUntil,{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'},data.preferences.zone)}`}</p>
-      <div className="form-actions">{alert.state !== 'acknowledged' && <Button variant="primary" icon={Check} onClick={() => updateState('acknowledged')}>ثبت رسیدگی</Button>}
-        {alert.state === 'open' ? <Button icon={Clock3} onClick={() => updateState('snoozed')}>تعویق ۲۴ ساعته</Button> : <Button onClick={() => updateState('open')}>بازگشایی هشدار</Button>}
+      {alertError && <p className="form-error" role="alert">{alertError}</p>}
+      <div className="form-actions">{alert.state !== 'resolved' && alert.state !== 'dismissed' && <>
+        {alert.state !== 'acknowledged' && <Button disabled={saving} onClick={() => updateState('acknowledged')}>ثبت رسیدگی</Button>}
+        <Button variant="primary" disabled={saving} icon={Check} onClick={() => updateState('resolved')}>حل هشدار</Button>
+        <Button disabled={saving} onClick={() => updateState('dismissed')}>کنار گذاشتن هشدار</Button>
+      </>}
+        {alert.state === 'open' ? <Button disabled={saving} icon={Clock3} onClick={() => updateState('snoozed')}>تعویق ۲۴ ساعته</Button> : <Button disabled={saving} onClick={() => updateState('open')}>بازگشایی هشدار</Button>}
       </div>
     </div></Modal>}
-    {config && <Modal title="تنظیم یادآوری‌ها" onClose={() => setConfig(false)}><Callout>ترجیحات در فضای کاری ذخیره می‌شوند. ارسال تلگرام نیازمند تنظیم اعتبارنامه و Worker مستقل است؛ ایمیل هنوز پیاده‌سازی نشده است.</Callout>{settings()}
+    {config && <Modal title="تنظیم یادآوری‌ها" onClose={() => setConfig(false)}><Callout>ترجیحات در فضای کاری ذخیره می‌شوند. ارسال بیرونی از طریق Worker تلگرام یا ایمیل انجام می‌شود.</Callout>{settings()}
       <div className="modal-footer"><TextLink href="/calendar">ثبت یادآوری در تقویم</TextLink></div>
     </Modal>}
   </>;

@@ -10,6 +10,8 @@ export const priorityTones: Record<Priority, Tone> = { high: 'bad', medium: 'war
 export const resourceTypes: Record<ResourceType, string> = { server: 'سرور', domain: 'دامنه', database: 'دیتابیس', service: 'سرویس' };
 export const resourceStatuses: Record<ResourceStatus, string> = { registered: 'ثبت شده', review: 'نیازمند بررسی', missing: 'ناقص' };
 export const resourceTones: Record<ResourceStatus, Tone> = { registered: 'good', review: 'warn', missing: 'warn' };
-export const incidentStates: Record<Incident['state'], string> = { open: 'باز', acknowledged: 'رسیدگی‌شده', snoozed: 'به‌تعویق‌افتاده' };
+export const incidentStates: Record<Incident['state'], string> = {
+  open:'باز', acknowledged:'رسیدگی‌شده', snoozed:'به‌تعویق‌افتاده', resolved:'حل‌شده', dismissed:'کنار گذاشته‌شده',
+};
 export const roles = { Owner: 'مدیر', Developer: 'توسعه‌دهنده', Viewer: 'ناظر' };
 export const choices = (labels: Record<string, string>) => Object.entries(labels).map(([value, label]) => ({ value, label }));

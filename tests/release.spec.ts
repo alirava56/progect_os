@@ -410,3 +410,45 @@ test('workspace overlay triggers become available when browser scripts are ready
   await account.click();
   await expect(page.getByRole('dialog', {name:'حساب کاربری'})).toBeVisible();
 });
+
+test('alerts preserve independent snoozed, dismissed and resolved states after saving', async ({page, origin}) => {
+  await bootstrap(page.request, origin);
+  const incident={id:'lifecycle-alert',projectId:'alert-project',title:'هشدار آزمایشی چرخه',priority:'medium',
+    date:'2031-03-04',source:'آزمایش رابط',state:'open'};
+  const seed=await page.request.patch('/api/records',{headers:origin,data:{version:0,changes:[
+    create('projects',project(incident.projectId)),create('incidents',incident),
+  ]}});
+  expect(seed.status()).toBe(200);
+  await page.goto('/alerts');
+  const alert=page.getByRole('button',{name:/هشدار آزمایشی چرخه/});
+  const dialog=page.getByRole('dialog',{name:'بررسی هشدار'});
+  const filter=page.getByLabel('وضعیت هشدار');
+  const read=async ()=>(await (await page.request.get('/api/records/incidents/lifecycle-alert')).json()).record;
+  await alert.click();
+  await dialog.getByRole('button',{name:'تعویق ۲۴ ساعته'}).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await read()).toEqual(expect.objectContaining({state:'snoozed',snoozedUntil:expect.any(String)}));
+  await filter.selectOption('snoozed');
+  await alert.click();
+  await page.route('**/api/records',route=>route.fulfill({status:422,json:{error:'Synthetic rejection'}}),{times:1});
+  const dismiss=dialog.getByRole('button',{name:'کنار گذاشتن هشدار'});
+  await dismiss.click();
+  await expect(dialog.getByRole('alert')).toContainText('ذخیرهٔ وضعیت هشدار تأیید نشد');
+  expect((await read()).state).toBe('snoozed');
+  await dismiss.click();
+  await expect(dialog).toHaveCount(0);
+  expect(await read()).toEqual(expect.objectContaining({state:'dismissed'}));
+  expect(await read()).not.toHaveProperty('snoozedUntil');
+  await filter.selectOption('dismissed');
+  await alert.click();
+  await dialog.getByRole('button',{name:'بازگشایی هشدار'}).click();
+  await expect(dialog).toHaveCount(0);
+  await filter.selectOption('open');
+  await alert.click();
+  await dialog.getByRole('button',{name:'حل هشدار'}).click();
+  await expect(dialog).toHaveCount(0);
+  await page.reload();
+  await filter.selectOption('resolved');
+  await expect(alert).toBeVisible();
+  expect((await read()).state).toBe('resolved');
+});

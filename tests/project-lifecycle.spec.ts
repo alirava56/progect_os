@@ -88,6 +88,7 @@ async function addResource(page: Page, resource: InventoryInput, projectName: st
   await dialog.getByLabel('ارائه‌دهنده').fill('میزبان آزمایشی');
   await dialog.getByLabel('محیط').selectOption('Staging');
   await dialog.getByLabel('سررسید (میلادی)').fill('2027-03-01');
+  await dialog.getByLabel('اعلان (روز قبل از موعد)').fill('2');
   if (resource.type === 'database') await dialog.getByLabel('پورت سرویس').fill('5432');
   if (resource.type === 'server') await dialog.getByLabel('پورت SSH').fill('2222');
   if (resource.parent) await dialog.getByLabel('منبع والد').selectOption({label:resource.parent + ' · ' + projectName});
@@ -152,6 +153,7 @@ for (const [projectName, slug] of [['NovaGuard آزمایشی', 'nova'], ['با�
       await view.getByText(resources[3].name, {exact:true}).click();
       const details = view.getByRole('dialog', {name:resources[3].name});
       await expect(details.getByText('5432', {exact:true})).toBeVisible();
+      await expect(details.getByText('۲ روز پیش از موعد', {exact:true})).toBeVisible();
       await expect(details.getByRole('link', {name:server, exact:true})).toBeVisible();
     }
     await page.reload();

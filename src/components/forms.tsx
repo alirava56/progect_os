@@ -32,6 +32,15 @@ export function ProjectField({ initial, all = false, onChange }: { initial?: str
   </select></Field>;
 }
 
+function NoticeDaysField({ initial, placeholder }: { initial?: number; placeholder: string }) {
+  return <Field label="اعلان (روز قبل از موعد)"><input name="noticeDays" type="number" min="0" max="60" step="1"
+    dir="ltr" defaultValue={initial} placeholder={placeholder} /></Field>;
+}
+
+function noticeDays(value: string) {
+  return value === '' ? undefined : Number(value);
+}
+
 export function ProjectForm({ onClose, project }: { onClose: () => void; project?: Project }) {
   const { change, saving } = useDemo();
   const router = useRouter();
@@ -82,6 +91,7 @@ export function TaskForm({ onClose, task, projectId, status }: { onClose: () => 
     const item: Task = {
       id:task?.id ?? newId('task'), title:get('title'), projectId:get('project'), status:get('status') as TaskStatus,
       priority:get('priority') as Priority, owner:get('owner'), due:get('due'), description:get('description'),
+      noticeDays:noticeDays(get('noticeDays')),
       checklist:task?.checklist ?? [], comments:task?.comments ?? [], dependencies:dependencyIds,
     };
     const message = task ? 'تغییرات وظیفه ذخیره شد.' : 'وظیفه ایجاد شد.';
@@ -101,6 +111,7 @@ export function TaskForm({ onClose, task, projectId, status }: { onClose: () => 
         <Field label="اولویت"><select name="priority" defaultValue={task?.priority ?? 'medium'}><SelectOptions options={choices(priorities)} /></select></Field>
       </div>
       <Field label="موعد (میلادی)"><input name="due" type="date" dir="ltr" required defaultValue={task?.due ?? today()} /></Field>
+      <NoticeDaysField initial={task?.noticeDays} placeholder="بدون اعلان اضافه" />
       <Field label="شرح وظیفه"><textarea name="description" rows={3} maxLength={1000} defaultValue={task?.description} /></Field>
       <Field label="وابستگی‌ها"><select name="dependencies" multiple size={Math.min(5,Math.max(2,data.tasks.length))} defaultValue={task?.dependencies??[]}>
         {data.tasks.filter(t=>t.id!==task?.id).map(t=><option key={t.id} value={t.id}>{t.title} · {data.projects.find(p=>p.id===t.projectId)?.name}</option>)}
@@ -134,12 +145,14 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
     const get = formValues(event);
     if (!get('name') || !get('provider')) { setError('نام منبع و ارائه‌دهنده را وارد کنید.'); return; }
     if (!validInventoryAddress(get('address'))) { setError('یک IPv4، IPv6، دامنه یا URL معتبر بدون نام کاربری و رمز وارد کنید.'); return; }
+    if (get('noticeDays') && !get('expires')) { setError('برای تعیین زمان اعلان، ابتدا موعد تمدید را وارد کنید.'); return; }
     const sharedProjects = [...new FormData(event.currentTarget).getAll('sharedProjects')].map(String).filter(id=>id!==get('project'));
     const item: Resource = { ...resource, id:resource?.id ?? newId('resource'), name:get('name'), projectId:get('project'), linkedProjectIds:sharedProjects, type,
       address:get('address'), environment:get('environment') as Environment,status:get('status') as ResourceStatus,
       provider:get('provider'), region:get('region') || undefined, os:get('os') || undefined,
       port:canSetPort ? get('port') ? Number(get('port')) : undefined : resource?.port, parentId:get('parent') || undefined,
-      expires:get('expires') || undefined, tags:get('tags').split(/[,،]/).map(tag => tag.trim()).filter(Boolean).slice(0,6),
+      expires:get('expires') || undefined, noticeDays:noticeDays(get('noticeDays')),
+      tags:get('tags').split(/[,،]/).map(tag => tag.trim()).filter(Boolean).slice(0,6),
     };
     const message = resource ? 'مشخصات منبع به‌روزرسانی شد.' : 'منبع ثبت شد.';
     const saved = await change(data => ({ ...data,resources:resource ? data.resources.map(r => r.id === item.id ? item : r) : [...data.resources,item] }),
@@ -165,6 +178,7 @@ export function ResourceForm({ onClose, resource, projectId, initialType = 'serv
           <Field label="موقعیت"><input dir="auto" name="region" maxLength={60} defaultValue={resource?.region} /></Field>
         </>}
         <Field label="سررسید (میلادی)"><input dir="ltr" name="expires" type="date" defaultValue={resource?.expires} /></Field>
+        <NoticeDaysField initial={resource?.noticeDays} placeholder="تنظیم پیش‌فرض تمدید" />
         <Field label="منبع والد"><select name="parent" defaultValue={resource?.parentId ?? ''}>
           <option value="">بدون منبع والد</option>
           {data.resources.filter(item => item.id !== resource?.id).map(item =>
@@ -215,7 +229,8 @@ export function ReminderForm({ onClose, due, projectId }: { onClose: () => void;
     const get = formValues(event);
     if (!get('title')) { setError('عنوان رویداد را وارد کنید.'); return; }
     const item: Reminder = { id:newId('reminder'), title:get('title'), projectId:get('project'), due:get('due'),
-      kind:get('kind') as Reminder['kind'], repeat:get('repeat') as Reminder['repeat'], zone:get('zone')||undefined };
+      kind:get('kind') as Reminder['kind'], repeat:get('repeat') as Reminder['repeat'], zone:get('zone')||undefined,
+      noticeDays:noticeDays(get('noticeDays')) };
     const saved = await change(data => ({ ...data, reminders:[...data.reminders,item] }), 'یادآوری ثبت شد.', { projectId:item.projectId, title:item.title, source:'تقویم' });
     if (!saved) { setError('ذخیرهٔ یادآوری تأیید نشد.'); return; }
     onClose();
@@ -226,6 +241,7 @@ export function ReminderForm({ onClose, due, projectId }: { onClose: () => void;
     <div className="form-grid">
       <Field label="نوع رویداد"><select name="kind"><SelectOptions options={['یادآوری','جلسه','تمدید']} /></select></Field>
       <Field label="موعد (میلادی)"><input dir="ltr" required name="due" type="date" defaultValue={due ?? today()} /></Field>
+      <NoticeDaysField placeholder="زمان‌بندی پیش‌فرض" />
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="form-grid">

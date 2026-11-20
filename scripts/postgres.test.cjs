@@ -67,7 +67,8 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
       create('docs', {id:'doc', projectId:'alpha', title:'آزمون', type:'Runbook', body:'Synthetic runbook', revision:1, updated:'2026-11-18'}),
       create('reminders', {id:'rem', projectId:'alpha', title:'Synthetic reminder', due:'2026-11-18', kind:'یادآوری'}),
       create('resources', {id:'vps', name:'Synthetic VPS', projectId:'alpha', linkedProjectIds:[], type:'server',
-        address:'203.0.113.10', environment:'Development', status:'registered', provider:'Fixture host', tags:[]}),
+        address:'203.0.113.10', environment:'Development', status:'registered', provider:'Fixture host', tags:[],
+        expires:'2031-03-04',noticeDays:2}),
       create('secrets', {id:'ref', projectId:'alpha', resourceId:'vps', name:'Vault pointer', type:'SSH Key',
         vaultProvider:'1Password', externalRef:'https://start.1password.com/open/i?i=synthetic'}),
     ]);
@@ -145,6 +146,19 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.equal(current.data.projects.find(item => item.id === 'beta').next, 'independent B');
     assert.equal(current.data.secrets.find(item => item.id === 'ref').resourceId, 'vps');
     assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?','outbox-fixture')).state, 'delivered');
+    const {reconcileReminders,reminderAlertId}=await import('./reminder-scheduler.mjs');
+    const scan=clock=>reconcileReminders({clock:new Date(clock),channels:['email'],notificationWorkspace:owner.workspaceId});
+    const vps=current.data.resources.find(item=>item.id==='vps');
+    assert.equal(vps.noticeDays,2);
+    await scan('2031-03-02T10:00:00Z');
+    const old='email-'+reminderAlertId(owner.workspaceId,'تمدید',vps.id,vps.expires,'resources');
+    assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?',old)).state,'pending');
+    const moved={...vps,expires:'2031-03-05'};
+    await commitRecordChanges(owner,(await loadState(owner)).version,[{kind:'resources',id:vps.id,action:'replace',record:moved}]);
+    assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?',old)).state,'cancelled');
+    await scan('2031-03-03T10:00:00Z');
+    const next='email-'+reminderAlertId(owner.workspaceId,'تمدید',vps.id,moved.expires,'resources');
+    assert.equal((await sql.one('SELECT state FROM notification_outbox WHERE id=?',next)).state,'pending');
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');

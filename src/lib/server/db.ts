@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { getDb, lockWorkspace, readTransaction, sql, transaction, type SqlExecutor } from '../../../scripts/database.mjs';
+import { reminderAlertId, retireReminderAlert } from '../../../scripts/reminder-scheduler.mjs';
 import { emptyData } from '../empty-data';
 import { isRecordKind, recordKinds, type RecordKind, type WorkspaceRecord } from '../record-contract';
 import type { ActivityEvent, DemoData, Preferences, Resource } from '../types';
@@ -215,6 +216,33 @@ function resourceLink(kind: RecordKind, record?: WorkspaceRecord) {
   }
 }
 
+function standaloneDeadline(kind: RecordKind, record?: WorkspaceRecord) {
+  if (kind === 'resources') {
+    const resource = record as Resource | undefined;
+    if (resource?.expires) return {category:'تمدید', date:resource.expires, projectId:resource.projectId};
+  }
+  if (kind === 'tasks') {
+    const task = record as DemoData['tasks'][number] | undefined;
+    if (task && task.status !== 'done' && task.noticeDays !== undefined) {
+      return {category:'یادآوری', date:task.due, projectId:task.projectId};
+    }
+  }
+}
+
+async function retireChangedDeadlines(db: SqlExecutor, workspace: string, changes: PreparedChange[]) {
+  for (const {kind, id, previous, record} of changes) {
+    if (!previous || (kind !== 'tasks' && kind !== 'resources')) continue;
+    const before = standaloneDeadline(kind, JSON.parse(previous.payload) as WorkspaceRecord);
+    const after = standaloneDeadline(kind, record);
+    if (!before || (before.date === after?.date && before.projectId === after?.projectId)) continue;
+    await retireReminderAlert(db, workspace, reminderAlertId(workspace, before.category, id, before.date, kind));
+    const legacy = reminderAlertId(workspace, before.category, id, before.date);
+    const provenLegacy = await db.one(`SELECT id FROM notification_outbox WHERE workspace_id=? AND id=? AND reminder_id=?`,
+      workspace, legacy, kind + ':' + id);
+    if (provenLegacy) await retireReminderAlert(db, workspace, legacy);
+  }
+}
+
 export async function persistChanges(
   db: SqlExecutor, account: Account, version: number, changes: PreparedChange[], preferences?: Preferences,
 ) {
@@ -292,6 +320,7 @@ export async function persistChanges(
     record ? previous ? 'update' : 'create' : 'delete', redactCredentials(title), projectId ?? '', now,
     redactCredentials(account.displayName));
   }
+  await retireChangedDeadlines(db, workspaceId, changes);
   if (preferences) {
     await writeRow(db, workspaceId, { kind: 'preferences', id: 'singleton', project_id: null,
       payload: JSON.stringify(preferences), record_version: version }, now);

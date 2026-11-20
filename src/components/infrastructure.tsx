@@ -40,6 +40,8 @@ function ResourceMeta({ resource }: { resource: Resource }) {
     ...(parent ? [{label:'منبع والد',value:<Link className="cell-link" href={resourceHref(parent)}><bdi>{parent.name}</bdi></Link>}] : []),
     {label:'پروژه مرتبط',value:<Link className="cell-link" href={projectHref(resource.projectId)}><bdi>{projectName(data,resource.projectId)}</bdi></Link>},
     {label:'تاریخ تمدید',value:resource.expires ? dateLabel(resource.expires,{day:'numeric',month:'long',year:'numeric'}) : <span className="ink-warn">ثبت نشده</span>},
+    ...(resource.noticeDays !== undefined ? [{label:'زمان اعلان تمدید',
+      value:resource.noticeDays === 0 ? 'روز موعد' : `${number(resource.noticeDays)} روز پیش از موعد`}] : []),
     ...(renewals.length ? [{label:'هزینه‌های دوره‌ای',value:<ul>{renewals.map(charge =>
       <li key={charge.id}>{charge.title} · {amountLabel(charge)} · {dateLabel(charge.nextDue)}</li>)}</ul>}] : []),
     {label:'برچسب‌ها',value:resource.tags.length ? resource.tags.map(tag => <Pill key={tag}><bdi>{tag}</bdi></Pill>) : '—'},

@@ -7,8 +7,16 @@ const dayString = ms => new Date(ms).toISOString().slice(0, 10);
 const dateAt = (zone, date) => new Intl.DateTimeFormat('sv-SE', {
   timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(date);
-const key = (workspace, kind, id, due, source) => 'auto-' + createHash('sha256')
+export const reminderAlertId = (workspace, kind, id, due, source) => 'auto-' + createHash('sha256')
   .update([workspace, kind, id, due, ...(source ? [source] : [])].join('|')).digest('hex').slice(0, 28);
+
+export async function retireReminderAlert(db, workspace, id) {
+  const removed = await db.run("DELETE FROM records WHERE workspace_id=? AND kind='incidents' AND id=?", workspace, id);
+  await db.run(`UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=?
+    AND (id=? OR id=? OR id=? OR id LIKE ? OR id LIKE ?) AND state IN ('pending','retrying','sending','available')`,
+  workspace, id, 'tg-' + id, 'email-' + id, 'tg-' + id + '-%', 'email-' + id + '-%');
+  return removed;
+}
 
 function dueDate(value, zone) {
   if (typeof value !== 'string') return null;
@@ -71,9 +79,14 @@ function activeCandidates(parsed, preferences, timestamp, horizon) {
   const info = [];
   for (const item of parsed) {
     const { kind, id, value } = item;
+    const noticeDays = Number.isSafeInteger(value.noticeDays) && value.noticeDays >= 0 && value.noticeDays <= 60
+      ? value.noticeDays : undefined;
     let draft;
     if (kind === 'reminders' && !value.paused) draft = {kind:value.kind, name:value.title,
       anchor:value.due, repeat:value.repeat, zone:value.zone ?? currentZone};
+    if (kind === 'tasks' && value.status !== 'done' && noticeDays !== undefined) draft = {
+      kind:'یادآوری', name:'موعد وظیفه ' + value.title, anchor:value.due, zone:currentZone,
+    };
     if (kind === 'charges' && value.status === 'active') draft = {
       kind:'تمدید', name:'اشتراک ' + value.title, anchor:value.nextDue, repeat:value.period, zone:currentZone,
     };
@@ -83,11 +96,13 @@ function activeCandidates(parsed, preferences, timestamp, horizon) {
     if (!draft || (draft.kind === 'تمدید' && preferences.renewal === false)) continue;
     const today = dateAt(draft.zone, timestamp);
     const low = dayString(utcDay(today) - 3 * dayMs);
-    const high = dayString(utcDay(today) + horizon * dayMs);
+    const high = dayString(utcDay(today) + (noticeDays ?? horizon) * dayMs);
     for (let due of occurrences(draft.anchor, draft.repeat, draft.zone, low, high)) {
+      const localDue = dueDate(due, draft.zone);
+      if (!localDue || (noticeDays !== undefined && localDue > high)) continue;
       // The anchor can have a historic UTC instant; keep its established identity.
       if (due === dueDate(draft.anchor, draft.zone)) due = draft.anchor;
-      info.push({ ...draft, id, due, projectId: value.projectId, source:kind, today });
+      info.push({ ...draft, id, due, projectId: value.projectId, source:kind, today, noticeDays });
     }
   }
   return info;
@@ -115,7 +130,7 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
         .map(row => [row.id, row]));
       const groups = new Map();
       for (const candidate of candidates) {
-        const legacy = key(workspace, candidate.kind, candidate.id, candidate.due);
+        const legacy = reminderAlertId(workspace, candidate.kind, candidate.id, candidate.due);
         const group = groups.get(legacy) ?? [];
         group.push(candidate);
         groups.set(legacy, group);
@@ -128,12 +143,12 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
           || incident?.title === row.name + ' · ' + dueDate(row.due, row.zone));
         if ((incident || reference) && match.length !== 1) {
           active.add(legacy);
-          for (const row of group) active.add(key(workspace, row.kind, row.id, row.due, row.source));
+          for (const row of group) active.add(reminderAlertId(workspace, row.kind, row.id, row.due, row.source));
           totals.ambiguousLegacy++;
           continue;
         }
         for (const row of group) {
-          const scoped = key(workspace, row.kind, row.id, row.due, row.source);
+          const scoped = reminderAlertId(workspace, row.kind, row.id, row.due, row.source);
           const legacyOwner = row === match[0] && !incidents.has(scoped) && !outbox.has(scoped) && !outbox.has('tg-' + scoped);
           const id = legacyOwner ? legacy : scoped;
           active.add(id);
@@ -143,10 +158,7 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
       let changes = 0, openCount = 0;
       for (const row of currentIncidents) {
         if (row.id.startsWith('auto-') && !active.has(row.id)) {
-          await db.run("DELETE FROM records WHERE workspace_id=? AND kind='incidents' AND id=?", workspace, row.id);
-          await db.run(`UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=?
-            AND (id=? OR id=? OR id LIKE ? OR id LIKE ?) AND state IN ('pending','retrying','sending','available')`,
-          workspace, 'tg-' + row.id, 'email-' + row.id, 'tg-' + row.id + '-%', 'email-' + row.id + '-%');
+          await retireReminderAlert(db, workspace, row.id);
           totals.retired++;
           changes++;
         } else if (row.value.state === 'snoozed' && row.value.snoozedUntil
@@ -169,7 +181,8 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
         const localDue = dueDate(row.due, row.zone);
         if (!localDue) continue;
         const diff = Math.round((utcDay(localDue) - utcDay(row.today)) / dayMs);
-        if (diff < -3 || diff > (row.kind === 'تمدید' ? horizon : row.repeat && row.repeat !== 'none' ? 0 : 3)) continue;
+        const lead = row.noticeDays ?? (row.kind === 'تمدید' ? horizon : row.repeat && row.repeat !== 'none' ? 0 : 3);
+        if (diff < -3 || diff > lead) continue;
         let incident = incidents.get(row.alertId);
         if (!incident) {
           incident = { id:row.alertId, title:row.name + ' · ' + localDue, projectId:row.projectId,
@@ -183,13 +196,14 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
           changes += created;
         }
         await db.run(`INSERT INTO notification_outbox(id,workspace_id,reminder_id,scheduled_for,channel,state,created_at)
-          VALUES(?,?,?,?,'in_app','available',?) ON CONFLICT DO NOTHING`,
+          VALUES(?,?,?,?,'in_app','available',?) ON CONFLICT(id) DO UPDATE SET state='available'
+          WHERE notification_outbox.state='cancelled'`,
         incident.id, workspace, row.ref, row.due, timestamp);
         if (incident.state !== 'open') continue;
         openCount++;
         for (const channel of targets) {
           const first = outbox.get((channel === 'telegram' ? 'tg-' : 'email-') + incident.id);
-          const scheduled = row.kind === 'تمدید' ? timing.has(diff) : diff === 0;
+          const scheduled = row.noticeDays === undefined && (row.kind === 'تمدید' ? timing.has(diff) : diff === 0);
           if (first && first.state !== 'cancelled' && !scheduled) continue;
           if (!first && diff < 0) continue;
           const priorDay = first && dateAt(row.zone, new Date(first.created_at)) !== row.today;
@@ -201,7 +215,7 @@ export async function reconcileReminders({ clock = new Date(), channels = [], no
       }
       if (preferences.digest && openCount) {
         const today = dateAt(preferences.zone ?? 'Asia/Tehran', clock);
-        const digestId = key(workspace, 'digest', 'daily', today);
+        const digestId = reminderAlertId(workspace, 'digest', 'daily', today);
         await enqueue(db, workspace, targets, digestId, 'digest:' + today, today, timestamp);
       }
       if (changes) await db.run('UPDATE workspaces SET version=? WHERE id=?', version, workspace);
