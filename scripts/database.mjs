@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { createHmac } from 'node:crypto';
 import { openSqlite } from './sqlite.mjs';
 
 let sqlite;
@@ -132,15 +133,40 @@ async function inTransaction(action, readOnly) {
   }
   const client = await getPostgresPool().connect();
   let discard = false;
+  function onConnectionError() { discard = true; }
+  client.on('error', onConnectionError);
   try {
     await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
-    const value = await action(postgresExecutor(client));
+    const db = postgresExecutor(client);
+    let workspace;
+    db.scopeWorkspace = async (workspaceId, documentScope) => {
+      if (!workspaceId || (workspace !== undefined && workspace !== workspaceId)) throw new Error('Invalid transaction workspace');
+      workspace = workspaceId;
+      const key = process.env.PROJECTOS_DB_SCOPE_KEY;
+      if (!key) return; // Schema owner maintenance does not require a web scope.
+      if (!/^[a-f0-9]{64}$/i.test(key)) throw new Error('Invalid database scope signing key');
+      const {rows:[{binding}]} = await client.query(
+        "SELECT pg_backend_pid()::text || ':' || extract(epoch FROM transaction_timestamp())::text AS binding");
+      const signature = createHmac('sha256',Buffer.from(key,'hex')).update(binding + ':' + workspaceId).digest('hex');
+      await client.query("SELECT set_config('projectos.workspace', $1, true), set_config('projectos.workspace_mac', $2, true)",
+        [workspaceId,signature]);
+      if (documentScope) {
+        const claims=JSON.stringify(documentScope);
+        const mac=createHmac('sha256',Buffer.from(key,'hex')).update(binding+':docs:'+workspaceId+':'+claims).digest('hex');
+        await client.query("SELECT set_config('projectos.document_scope', $1, true), set_config('projectos.document_mac', $2, true)",
+          [claims,mac]);
+      }
+    };
+    const value = await action(db);
     await client.query('COMMIT');
     return value;
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch { discard = true; }
+    if (!discard) {
+      try { await client.query('ROLLBACK'); } catch { discard = true; }
+    }
     throw error;
   } finally {
+    client.removeListener('error', onConnectionError);
     client.release(discard);
   }
 }

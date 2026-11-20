@@ -8,6 +8,17 @@ const migrations = [
   ['004_machine_disk_metrics', new URL('../schema/postgres/004_machine_disk_metrics.sql', import.meta.url)],
   ['005_invoice_records', new URL('../schema/postgres/005_invoice_records.sql', import.meta.url)],
   ['006_exchange_rate_records', new URL('../schema/postgres/006_exchange_rate_records.sql', import.meta.url)],
+  ['007_record_identity', new URL('../schema/postgres/007_record_identity.sql', import.meta.url)],
+  ['008_workspace_record_rls', new URL('../schema/postgres/008_workspace_record_rls.sql', import.meta.url)],
+  ['009_signed_workspace', new URL('../schema/postgres/009_signed_workspace.sql', import.meta.url)],
+  ['010_delivery_boundaries', new URL('../schema/postgres/010_delivery_boundaries.sql', import.meta.url)],
+  ['011_document_project_rls', new URL('../schema/postgres/011_document_project_rls.sql', import.meta.url)],
+  ['012_record_project_rls', new URL('../schema/postgres/012_record_project_rls.sql', import.meta.url)],
+  ['013_monitor_role', new URL('../schema/postgres/013_monitor_role.sql', import.meta.url)],
+  ['014_reminder_role', new URL('../schema/postgres/014_reminder_role.sql', import.meta.url)],
+  ['015_private_task_graph', new URL('../schema/postgres/015_private_task_graph.sql', import.meta.url)],
+  ['016_audit_project_rls', new URL('../schema/postgres/016_audit_project_rls.sql', import.meta.url)],
+  ['017_integration_rls', new URL('../schema/postgres/017_integration_rls.sql', import.meta.url)],
 ];
 const client = await getPostgresPool().connect();
 try {

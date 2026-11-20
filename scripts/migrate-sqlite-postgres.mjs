@@ -4,17 +4,19 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { closeDatabase, getPostgresPool } from './database.mjs';
 import { decryptArchive, sqliteHeader } from './encrypted-archive.mjs';
-import { importSnapshot, manifest, migrationError, openSnapshot } from './sqlite-import.mjs';
+import { importSnapshot, manifest, migrationError, openSnapshot, verifyRollbackBoundary } from './sqlite-import.mjs';
 
 let scratch, snapshot;
 try {
   const { values } = parseArgs({ options: {
     source: { type: 'string' }, backup: { type: 'string' }, apply: { type: 'boolean' }, 'dry-run': { type: 'boolean' },
+    'check-rollback': {type:'boolean'},
   } });
-  if (!values.source || (values.apply && (values['dry-run'] || !values.backup))) throw new Error('INVALID_ARGUMENTS');
+  if (!values.source || (values.apply && (values['dry-run'] || !values.backup))
+    || (values['check-rollback'] && (values.apply || values['dry-run'] || !values.backup))) throw new Error('INVALID_ARGUMENTS');
   snapshot = openSnapshot(resolve(values.source));
   const planned = manifest(snapshot);
-  if (!values.apply) console.log(JSON.stringify({ ...planned, status: 'dry-run; PostgreSQL untouched' }));
+  if (!values.apply && !values['check-rollback']) console.log(JSON.stringify({ ...planned, status: 'dry-run; PostgreSQL untouched' }));
   else {
     scratch = await mkdtemp(join(tmpdir(), 'projectos-migration-'));
     const restored = join(scratch, 'verified.sqlite');
@@ -23,11 +25,13 @@ try {
     try {
       if (manifest(verified).digest !== planned.digest) throw new Error('SQLITE_BACKUP_DOES_NOT_MATCH_SOURCE');
     } finally { verified.close(); }
-    console.log(JSON.stringify(await importSnapshot(getPostgresPool(), snapshot, planned)));
+    const pool=getPostgresPool();
+    console.log(JSON.stringify(values['check-rollback']
+      ? await verifyRollbackBoundary(pool,planned) : await importSnapshot(pool,snapshot,planned)));
   }
 } catch (error) {
   console.error('SQLite import stopped:', migrationError(error),
-    'Usage: --source path [--dry-run | --apply --backup path.posbak]');
+    'Usage: --source path [--dry-run | --apply --backup path.posbak | --check-rollback --backup path.posbak]');
   process.exitCode = 1;
 } finally {
   snapshot?.close();

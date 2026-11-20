@@ -1,5 +1,5 @@
 import { fork, execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,10 +13,12 @@ if (!['postgres:', 'postgresql:'].includes(adminUrl.protocol) || !['127.0.0.1','
 
 const database = 'projectos_test_' + randomBytes(6).toString('hex');
 const runtime = new URL('/' + database, adminUrl);
+const runtimeRole = database.replace('projectos_test_', 'projectos_app_');
+const runtimePassword = randomBytes(24).toString('hex');
 const scratch = await mkdtemp(join(tmpdir(),'projectos-pg-http-'));
 const admin = new pg.Client({connectionString:adminUrl.href});
 const setupToken = 'synthetic-runtime-test-bootstrap-token';
-let server, existed = false;
+let server, existed = false, roleCreated = false;
 
 async function startServer(env) {
   server = fork(resolve('scripts/prepare-e2e.mjs'),[],{env,stdio:['ignore','ignore','pipe','ipc']});
@@ -47,6 +49,23 @@ try {
     PROJECTOS_SETUP_TOKEN:setupToken, PROJECTOS_AI_ENABLED:'disabled', PROJECTOS_GITHUB_TOKEN:'',
   };
   execFileSync(process.execPath,[resolve('scripts/migrate-postgres.mjs')],{env,stdio:['ignore','ignore','pipe'],timeout:30_000});
+  await admin.query(`CREATE ROLE "${runtimeRole}" LOGIN PASSWORD '${runtimePassword}'`);
+  roleCreated = true;
+  const psql = process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN, 'psql') : 'psql';
+  execFileSync(psql,['-X','-h',adminUrl.hostname,'-p',adminUrl.port||'5432','-U',decodeURIComponent(adminUrl.username),
+    '-d',database,'-v','runtime_role='+runtimeRole,'-f',resolve('schema/postgres/grant-runtime.sql')],{
+    env:{...env, PGPASSWORD:decodeURIComponent(adminUrl.password)},stdio:['ignore','ignore','pipe'],timeout:30_000,
+  });
+  const appDatabase = new URL(runtime);
+  const signingKey=randomBytes(32);
+  const installer=new pg.Client({connectionString:runtime.href});
+  await installer.connect();
+  try { await installer.query('INSERT INTO projectos_private.scope_key VALUES(true,$1)',[signingKey]); }
+  finally { await installer.end(); }
+  env.PROJECTOS_DB_SCOPE_KEY=signingKey.toString('hex');
+  appDatabase.username = runtimeRole;
+  appDatabase.password = runtimePassword;
+  env.PROJECTOS_DATABASE_URL = appDatabase.href;
   let appUrl = await startServer(env);
   const ready = await fetch(appUrl+'/api/health');
   assert.equal(ready.status,200);
@@ -93,10 +112,11 @@ try {
   } finally { await pgClient.end(); }
   await stopServer();
   const agentToken='synthetic-runtime-monitor-agent-fixture-only';
+  const webhookSecret=randomBytes(32).toString('hex');
   appUrl=await startServer({...env, PROJECTOS_MONITOR_WORKSPACE:workspace,
     PROJECTOS_MONITOR_AGENT_TOKEN:agentToken, PROJECTOS_MONITOR_AGENT_RESOURCES:resource.id,
     PROJECTOS_GITHUB_PROJECTS:JSON.stringify(repositories.map(([projectId,repository])=>({workspaceId:workspace,projectId,repository}))),
-    PROJECTOS_GITHUB_TOKEN:'synthetic-binding-fixture'});
+    PROJECTOS_GITHUB_TOKEN:'synthetic-binding-fixture',PROJECTOS_GITHUB_WEBHOOK_SECRET:webhookSecret});
   headers.Origin=appUrl;
   const observe=(body, token=agentToken)=>fetch(appUrl+'/api/monitoring/observations',{
     method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
@@ -132,6 +152,49 @@ try {
     body:JSON.stringify({token:(await invitation.json()).token,email:viewer,password:account.password,displayName:'Fixture viewer'})});
   assert.equal(joined.status,200);
   const viewerHeaders={Cookie:joined.headers.get('set-cookie').split(';',1)[0]};
+  const version=(await (await fetch(appUrl+'/api/state',{headers})).json()).version;
+  const revisions=[project,otherProject].map(({id})=>({kind:'docs',id:'doc-'+id,action:'create',
+    record:{id:'doc-'+id,projectId:id,title:'Synthetic runbook',type:'Runbook',body:'Synthetic history evidence',
+      revision:1,updated:'2026-11-20'}}));
+  assert.equal((await fetch(appUrl+'/api/records',{headers,method:'PATCH',body:JSON.stringify({version,changes:revisions})})).status,200);
+  const history=(id,session)=>fetch(appUrl+'/api/docs/history?id=doc-'+id,{headers:session});
+  const [ownerHistory,visibleHistory,hiddenHistory]=await Promise.all([
+    history(project.id,headers),history(otherProject.id,viewerHeaders),history(project.id,viewerHeaders),
+  ]);
+  assert.equal(ownerHistory.status,200);
+  assert.equal((await ownerHistory.json()).versions.length,1);
+  assert.equal(visibleHistory.status,200);
+  assert.equal((await visibleHistory.json()).versions.length,1);
+  assert.equal(hiddenHistory.status,404);
+  const memberEmail='runtime-editor@example.test';
+  const editorInvite=await fetch(appUrl+'/api/team/invitations',{method:'POST',headers,
+    body:JSON.stringify({email:memberEmail,role:'editor',projectIds:[otherProject.id]})});
+  assert.equal(editorInvite.status,200);
+  const editorJoin=await fetch(appUrl+'/api/auth/accept-invite',{method:'POST',
+    headers:{'Content-Type':'application/json',Origin:appUrl,'Sec-Fetch-Site':'same-origin'},
+    body:JSON.stringify({token:(await editorInvite.json()).token,email:memberEmail,password:account.password,displayName:'Fixture editor'})});
+  assert.equal(editorJoin.status,200);
+  const editorHeaders={...headers,Cookie:editorJoin.headers.get('set-cookie').split(';',1)[0]};
+  const commit=async (changes,session=headers)=>{
+    const state=await (await fetch(appUrl+'/api/state',{headers:session})).json();
+    return fetch(appUrl+'/api/records',{headers:session,method:'PATCH',body:JSON.stringify({version:state.version,changes})});
+  };
+  const makeTask=(id,projectId,dependencies=[])=>({id,projectId,title:id,status:'todo',priority:'medium',
+    owner:'',due:'2031-03-01',description:'',checklist:[],comments:[],dependencies});
+  const taskChange=(record,action='create')=>({kind:'tasks',id:record.id,record,action});
+  const privateTask=makeTask('legacy-private-task',project.id);
+  const editorTask=makeTask('legacy-editor-task',otherProject.id,[privateTask.id]);
+  assert.equal((await commit([taskChange(privateTask),taskChange(editorTask)])).status,200);
+  assert.equal((await fetch(appUrl+'/api/records/tasks/'+privateTask.id,{headers:editorHeaders})).status,404);
+  const updatedTask={...editorTask,title:'Updated editor task',dependencies:[]};
+  assert.equal((await commit([taskChange(updatedTask,'replace')],editorHeaders)).status,200);
+  const ownerTask=await (await fetch(appUrl+'/api/records/tasks/'+editorTask.id,{headers})).json();
+  assert.deepEqual(ownerTask.record.dependencies,[privateTask.id]);
+  assert.equal((await commit([taskChange({...updatedTask,dependencies:[privateTask.id]},'replace')],editorHeaders)).status,422);
+  const first=makeTask('cycle-first',otherProject.id,['cycle-second']);
+  const second=makeTask('cycle-second',otherProject.id,['cycle-first']);
+  assert.equal((await commit([taskChange(first),taskChange(second)],editorHeaders)).status,422);
+  assert.equal((await fetch(appUrl+'/api/records/tasks/'+first.id,{headers})).status,404);
   assert.equal((await fetch(endpoint,{headers:viewerHeaders})).status,404);
   const github=appUrl+'/api/integrations/github';
   assert.equal((await fetch(github,{headers:viewerHeaders})).status,403);
@@ -142,6 +205,14 @@ try {
   const denied=await fetch(github,{method:'POST',headers:{...headers,...viewerHeaders},
     body:JSON.stringify({projectId:otherProject.id,repository:'fixture/second',backfill:true})});
   assert.equal(denied.status,403);
+  const githubPayload=JSON.stringify({repository:{full_name:'fixture/second'}});
+  const deliveryHeaders={'Content-Type':'application/json','X-GitHub-Event':'push','X-GitHub-Delivery':randomUUID(),
+    'X-Hub-Signature-256':'sha256='+createHmac('sha256',webhookSecret).update(githubPayload).digest('hex')};
+  const webhook=()=>fetch(github+'/webhook',{method:'POST',headers:deliveryHeaders,body:githubPayload});
+  assert.deepEqual(await (await webhook()).json(),{accepted:1});
+  assert.deepEqual(await (await webhook()).json(),{accepted:0});
+  const refreshed=await (await fetch(github+'?projectId='+otherProject.id,{headers:viewerHeaders})).json();
+  assert.equal(refreshed.repositories[0].state,'pending_refresh');
   const published=await fetch(appUrl+'/api/activity',{method:'POST',headers,
     body:JSON.stringify({projectId:project.id,title:'Verified synthetic activity',detail:'Fixture evidence from the PostgreSQL HTTP run.'})});
   assert.equal(published.status,200);
@@ -180,6 +251,7 @@ try {
 } finally {
   await stopServer();
   if (existed) await admin.query('DROP DATABASE "' + database + '"');
+  if (roleCreated) await admin.query('DROP ROLE "' + runtimeRole + '"');
   await admin.end();
   await rm(scratch,{recursive:true,force:true,maxRetries:4});
 }

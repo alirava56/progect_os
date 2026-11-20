@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- run the TypeScript services with Node's test runner */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomBytes } = require('node:crypto');
+const { createHmac, randomBytes } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -17,7 +17,7 @@ require.extensions['.ts'] = (module, file) => {
   module._compile(compiled, file);
 };
 
-const { closeDatabase, getPostgresPool, getDb } = require('./database.mjs');
+const { closeDatabase, getPostgresPool, getDb, readTransaction } = require('./database.mjs');
 const { setupOwner, authenticate, newSession, lookupSessionUserId } = require('../src/lib/server/auth.ts');
 const { accountByUser, loadState, sql } = require('../src/lib/server/db.ts');
 const { commitRecordChanges } = require('../src/lib/server/record-service.ts');
@@ -37,6 +37,14 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
   const suffix = randomBytes(6).toString('hex');
   const target = 'projectos_test_' + suffix;
   const restoreTarget = 'projectos_restore_' + suffix;
+  const runtimeRole = 'projectos_runtime_' + suffix;
+  const deliveryRole = 'projectos_delivery_' + suffix;
+  const monitorRole = 'projectos_monitor_' + suffix;
+  const reminderRole = 'projectos_reminder_' + suffix;
+  let reminderCreated = false;
+  let monitorCreated = false;
+  let deliveryCreated = false;
+  let runtimeCreated = false;
   const connectionFor = db => new URL('/' + db, url).href;
   const admin = new Client({ connectionString: url.href });
   const area = mkdtempSync(join(tmpdir(), 'projectos-pg-test-'));
@@ -98,6 +106,27 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     process.env.PROJECTOS_RESTORE_URL = connectionFor(restoreTarget);
     assert.match(run('migrate-postgres.mjs'), /Applied 001_initial/);
     assert.doesNotMatch(run('migrate-postgres.mjs'), /Applied/);
+    const runtimePassword=randomBytes(24).toString('hex');
+    await admin.query(`CREATE ROLE "${runtimeRole}" LOGIN PASSWORD '${runtimePassword}'`);
+    runtimeCreated = true;
+    const psql = process.env.PROJECTOS_PG_BIN ? join(process.env.PROJECTOS_PG_BIN, 'psql') : 'psql';
+    const roleArgs = ['-X', '-h', url.hostname, '-p', url.port || '5432', '-U', decodeURIComponent(url.username),
+      '-d', target, '-f', join(__dirname, '../schema/postgres/grant-runtime.sql'), '-v'];
+    const psqlOptions = {encoding:'utf8', env:{...process.env, PGPASSWORD:decodeURIComponent(url.password)}, timeout:30_000};
+    assert.throws(() => execFileSync(psql,[...roleArgs,'runtime_role='+decodeURIComponent(url.username)],psqlOptions),
+      /dedicated unprivileged/);
+    execFileSync(psql,[...roleArgs,'runtime_role='+runtimeRole],psqlOptions);
+    const scoped = new Client({connectionString:connectionFor(target)});
+    try {
+      await scoped.connect();
+      await scoped.query('SET ROLE "' + runtimeRole + '"');
+      await scoped.query('SELECT id FROM records LIMIT 1');
+      await scoped.query('UPDATE records SET record_version=record_version WHERE FALSE');
+      await assert.rejects(scoped.query('DELETE FROM audit_events WHERE FALSE'),{code:'42501'});
+      await assert.rejects(scoped.query('UPDATE document_versions SET revision=revision WHERE FALSE'),{code:'42501'});
+      await assert.rejects(scoped.query('SELECT id FROM projectos_schema_migrations'),{code:'42501'});
+      await assert.rejects(scoped.query('CREATE TABLE public.runtime_forbidden(id integer)'),{code:'42501'});
+    } finally { await scoped.end(); }
 
     const { importSnapshot, manifest, openSnapshot } = await import('./sqlite-import.mjs');
     const source = openSnapshot(sqlitePath);
@@ -107,12 +136,21 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
       }), /simulated pre-commit failure/);
       assert.equal((await sql.one('SELECT COUNT(*) AS n FROM users')).n, 0);
       assert.equal((await sql.one('SELECT COUNT(*) AS n FROM sqlite_imports')).n, 0);
+      await assert.rejects(importSnapshot(getPostgresPool(),source,manifest(source),async client=>{
+        const {rows:[db]}=await client.query('SELECT current_database() AS database');
+        assert.equal(db.database,target);
+        await client.query('SELECT pg_terminate_backend(pg_backend_pid())');
+      }),error=>['57P01','ECONNRESET'].includes(error.code));
+      assert.equal((await sql.one('SELECT COUNT(*) AS n FROM users')).n,0);
+      assert.equal((await sql.one('SELECT COUNT(*) AS n FROM sqlite_imports')).n,0);
     } finally { source.close(); }
 
     const imported = JSON.parse(run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--apply','--backup',legacyBackup));
     assert.equal(imported.status, 'imported');
     assert.equal(imported.digest, plan.digest);
     assert.deepEqual(imported.counts, plan.counts);
+    const rollbackCheck=()=>run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--check-rollback','--backup',legacyBackup);
+    assert.equal(JSON.parse(rollbackCheck()).status,'matches_imported_snapshot');
     assert.equal(JSON.parse(run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--apply','--backup',legacyBackup)).status, 'already_imported');
     assert.equal(JSON.parse(run('migrate-sqlite-postgres.mjs','--source',sqlitePath,'--dry-run')).digest, plan.digest);
 
@@ -128,9 +166,127 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
       commitRecordChanges(owner, before.version, [edit('beta', 'independent B')]),
     ]);
     assert.notEqual(one, two);
+    assert.throws(rollbackCheck,/Unsafe SQLite rollback/);
     await assert.rejects(commitRecordChanges(owner, before.version, [edit('alpha', 'stale')]), /changed/);
     const record = await sql.one("SELECT payload FROM records WHERE kind='projects' AND id='alpha'");
     assert.equal(JSON.parse(record.payload).next, 'independent A');
+    const identityProbe = new Client({connectionString:connectionFor(target)});
+    const unrelated = 'unrelated-' + suffix;
+    const scopeKey=randomBytes(32);
+    try {
+      await identityProbe.connect();
+      await identityProbe.query('INSERT INTO projectos_private.scope_key VALUES(true,$1)',[scopeKey]);
+      await assert.rejects(identityProbe.query(
+        "UPDATE records SET payload=(payload::jsonb || jsonb_build_object('projectId','beta'))::text WHERE kind='docs'",
+      ), {code:'23514', constraint:'records_payload_identity'});
+      await assert.rejects(identityProbe.query(
+        "UPDATE records SET project_id=NULL WHERE kind='docs'",
+      ), {code:'23514', constraint:'records_payload_identity'});
+      assert.equal((await identityProbe.query("SELECT project_id FROM records WHERE kind='docs'")).rows[0].project_id,'alpha');
+      const stamp = new Date().toISOString();
+      await identityProbe.query('INSERT INTO workspaces(id,name,created_at) VALUES($1,$2,$3)', [unrelated,'Synthetic second workspace',stamp]);
+      await identityProbe.query(`INSERT INTO records(workspace_id,kind,id,project_id,payload,updated_at)
+        VALUES($1,'projects','other','other',$2,$3)`,[unrelated,JSON.stringify(project('other')),stamp]);
+      await identityProbe.query('SET ROLE "' + runtimeRole + '"');
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query('BEGIN');
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[owner.workspaceId]);
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      const {rows:[{binding}]}=await identityProbe.query(
+        "SELECT pg_backend_pid()::text || ':' || extract(epoch FROM transaction_timestamp())::text AS binding");
+      const mac=createHmac('sha256',scopeKey).update(binding+':'+owner.workspaceId).digest('hex');
+      await identityProbe.query("SELECT set_config('projectos.workspace_mac',$1,true)",[mac]);
+      const claims=JSON.stringify({role:'viewer',projects:['alpha']});
+      const setRecordScope=(value,signed=value)=>identityProbe.query(
+        "SELECT set_config('projectos.document_scope',$1,true),set_config('projectos.document_mac',$2,true)",
+        [value,createHmac('sha256',scopeKey).update(binding+':docs:'+owner.workspaceId+':'+signed).digest('hex')]);
+      await setRecordScope(JSON.stringify({role:'owner',projects:null}),claims);
+      assert.equal((await identityProbe.query('SELECT revision FROM document_versions')).rowCount,0);
+      assert.equal((await identityProbe.query('SELECT id FROM records')).rowCount,0);
+      await setRecordScope(claims);
+      assert.equal((await identityProbe.query('SELECT revision FROM document_versions')).rowCount,1);
+      assert.equal((await identityProbe.query("SELECT id FROM records WHERE kind='projects' AND id='beta'")).rowCount,0);
+      assert.equal((await identityProbe.query("UPDATE records SET record_version=record_version+1 WHERE kind='docs'")).rowCount,0);
+      await identityProbe.query('SAVEPOINT viewer_write');
+      await assert.rejects(identityProbe.query(`INSERT INTO document_versions(workspace_id,document_id,revision,payload,saved_at)
+        SELECT workspace_id,document_id,revision+100,payload,saved_at FROM document_versions`),{code:'42501'});
+      await identityProbe.query('ROLLBACK TO SAVEPOINT viewer_write');
+      assert.equal((await identityProbe.query("SELECT id FROM records WHERE kind='docs'")).rowCount,1);
+      assert.equal((await identityProbe.query('SELECT id FROM records WHERE workspace_id=$1',[unrelated])).rowCount,0);
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[unrelated]);
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true)",[owner.workspaceId]);
+      await setRecordScope(JSON.stringify({role:'editor',projects:['alpha']}));
+      await identityProbe.query('SAVEPOINT editor_move');
+      await assert.rejects(identityProbe.query(`UPDATE records SET project_id='beta',
+        payload=jsonb_set(payload::jsonb,'{projectId}','"beta"')::text WHERE kind='docs'`),{code:'42501'});
+      await identityProbe.query('ROLLBACK TO SAVEPOINT editor_move');
+      await setRecordScope(JSON.stringify({role:'owner',projects:null}));
+      await assert.rejects(identityProbe.query(
+        "UPDATE records SET workspace_id='outside-fixture' WHERE kind='docs'",
+      ),{code:'42501'});
+      await identityProbe.query('ROLLBACK');
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await identityProbe.query('BEGIN');
+      await identityProbe.query("SELECT set_config('projectos.workspace',$1,true), set_config('projectos.workspace_mac',$2,true)",[owner.workspaceId,mac]);
+      assert.equal((await identityProbe.query('SELECT count(*) FROM records')).rows[0].count,'0');
+      await assert.rejects(identityProbe.query('SELECT secret FROM projectos_private.scope_key'),{code:'42501'});
+      await identityProbe.query('ROLLBACK');
+      await identityProbe.query('RESET ROLE');
+    } finally { await identityProbe.end(); }
+
+    await closeDatabase();
+    const limitedUrl=new URL(connectionFor(target));
+    limitedUrl.username=runtimeRole;
+    limitedUrl.password=runtimePassword;
+    process.env.PROJECTOS_DATABASE_URL=limitedUrl.href;
+    process.env.PROJECTOS_DB_SCOPE_KEY=scopeKey.toString('hex');
+    getPostgresPool().options.max=2;
+    const projectIds=(db)=>db.all("SELECT id FROM records WHERE kind='projects' ORDER BY id");
+    const transactionIds=new Set();
+    const tracked=async db=>{
+      transactionIds.add((await db.one('SELECT pg_backend_pid() AS pid')).pid);
+      assert.deepEqual(await projectIds(db),[]);
+    };
+    for (let attempt=0;attempt<5;attempt++) {
+      await Promise.all([
+        assert.rejects(readTransaction(async db=>{
+          await tracked(db);
+          await db.scopeWorkspace(owner.workspaceId,{role:'editor',projects:['alpha']});
+          assert.deepEqual(await projectIds(db),[{id:'alpha'}]);
+          await db.one('SELECT 1/0');
+        }),{code:'22012'}),
+        readTransaction(async db=>{
+          await tracked(db);
+          await db.scopeWorkspace(unrelated,{role:'owner',projects:null});
+          assert.deepEqual(await projectIds(db),[{id:'other'}]);
+        }),
+        readTransaction(async db=>{
+          await tracked(db);
+          await db.scopeWorkspace(owner.workspaceId,{role:'viewer',projects:['beta']});
+          assert.deepEqual(await projectIds(db),[{id:'beta'}]);
+        }),
+      ]);
+    }
+    assert.equal(transactionIds.size,2);
+    await readTransaction(tracked);
+    let terminatedPid;
+    await assert.rejects(readTransaction(async db=>{
+      terminatedPid=(await db.one('SELECT pg_backend_pid() AS pid')).pid;
+      await db.scopeWorkspace(owner.workspaceId,{role:'owner',projects:null});
+      assert.deepEqual(await projectIds(db),[{id:'alpha'},{id:'beta'}]);
+      await db.one('SELECT pg_terminate_backend(pg_backend_pid())');
+    }),error=>['57P01','ECONNRESET'].includes(error.code));
+    await readTransaction(async db=>{
+      assert.notEqual((await db.one('SELECT pg_backend_pid() AS pid')).pid,terminatedPid);
+      assert.deepEqual(await projectIds(db),[]);
+      await db.scopeWorkspace(unrelated,{role:'owner',projects:null});
+      assert.deepEqual(await projectIds(db),[{id:'other'}]);
+    });
+    await closeDatabase();
+    delete process.env.PROJECTOS_DB_SCOPE_KEY;
+    process.env.PROJECTOS_DATABASE_URL=connectionFor(target);
+    await sql.run('DELETE FROM workspaces WHERE id=?',unrelated);
 
     const report = JSON.parse(run('postgres-backup.mjs','backup',postgresBackup));
     assert.equal(report.encrypted, true);
@@ -147,6 +303,9 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     const catalog=execFileSync(pgRestore,['--list',catalogFixture],{encoding:'utf8',timeout:15_000});
     assert.match(catalog,/TABLE public records\b/);
     assert.match(catalog,/TABLE public machine_observations\b/);
+    assert.match(catalog,/TABLE projectos_private scope_key\b/);
+    assert.match(catalog,/EXTENSION - pgcrypto\b/);
+    assert.doesNotMatch(catalog,/TABLE DATA projectos_private scope_key\b/);
     const truncatedBackup=join(area,'truncated.posbak');
     const archive=readFileSync(catalogFixture);
     await encryptArchive(Readable.from([archive.subarray(0,archive.length-512)]),
@@ -244,9 +403,105 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     assert.deepEqual(restoredLedger.payments,[saved]);
     assert.equal(restoredLedger.invoices.find(row=>row.id===unpaid.id).state,'void');
     assert.deepEqual(restoredLedger.exchangeRates,[quote]);
+    const deliveryPassword = randomBytes(24).toString('hex');
+    await admin.query(`CREATE ROLE "${deliveryRole}" LOGIN PASSWORD '${deliveryPassword}'`);
+    deliveryCreated = true;
+    const otherWorkspace='delivery-other-'+suffix;
+    const stamp=new Date().toISOString();
+    await sql.run('INSERT INTO workspaces(id,name,created_at) VALUES(?,?,?)',otherWorkspace,'Synthetic other workspace',stamp);
+    for (const [id,workspace] of [['allowed-delivery',owner.workspaceId],['hidden-delivery',otherWorkspace]]) {
+      await sql.run(`INSERT INTO notification_outbox(id,workspace_id,reminder_id,scheduled_for,channel,state,created_at)
+        VALUES(?,?,?,'2031-03-01','telegram','pending',?)`,id,workspace,'fixture',stamp);
+    }
+    execFileSync(psql,['-X','-h',url.hostname,'-p',url.port||'5432','-U',decodeURIComponent(url.username),
+      '-d',ledgerRestore,'-f',join(__dirname,'../schema/postgres/grant-delivery.sql'),
+      '-v','delivery_role='+deliveryRole,'-v','workspace_id='+owner.workspaceId],psqlOptions);
+    await closeDatabase();
+    const deliveryUrl=new URL(connectionFor(ledgerRestore));
+    deliveryUrl.username=deliveryRole;
+    deliveryUrl.password=deliveryPassword;
+    process.env.PROJECTOS_DATABASE_URL=deliveryUrl.href;
+    const {deliverNotifications}=await import('./notification-delivery.mjs');
+    const sent=[];
+    const delivery=await deliverNotifications(owner.workspaceId,{telegram:async job=>{sent.push(job.id);return true;}});
+    assert.equal(delivery.accepted,1);
+    assert.deepEqual(sent,['allowed-delivery']);
+    assert.equal(await sql.one("SELECT id FROM notification_outbox WHERE id='hidden-delivery'"),undefined);
+    await assert.rejects(deliverNotifications(otherWorkspace,{telegram:async()=>true}),/Unknown notification workspace/);
+    await assert.rejects(sql.all('SELECT id FROM records'),{code:'42501'});
+    await assert.rejects(sql.run("UPDATE notification_outbox SET reminder_id='blocked'"),{code:'42501'});
+    await assert.rejects(sql.run("INSERT INTO worker_heartbeats(name,checked_at) VALUES('forbidden',?)",stamp),{code:'42501'});
+
+    const monitorPassword=randomBytes(24).toString('hex');
+    await admin.query(`CREATE ROLE "${monitorRole}" LOGIN PASSWORD '${monitorPassword}'`);
+    monitorCreated=true;
+    const targetAdmin=new Client({connectionString:connectionFor(ledgerRestore)});
+    const monitorUrl=new URL(connectionFor(ledgerRestore));
+    monitorUrl.username=monitorRole;
+    monitorUrl.password=monitorPassword;
+    const monitor=new Client({connectionString:monitorUrl.href});
+    try {
+      await targetAdmin.connect();
+      const sample={id:'probe-resource',projectId:'alpha',address:'https://127.0.0.1'};
+      await targetAdmin.query(`INSERT INTO records(workspace_id,kind,id,project_id,payload,updated_at)
+        VALUES($1,'resources',$2,'alpha',$3,$4)`,[owner.workspaceId,sample.id,JSON.stringify(sample),stamp]);
+      execFileSync(psql,['-X','-h',url.hostname,'-p',url.port||'5432','-U',decodeURIComponent(url.username),
+        '-d',ledgerRestore,'-f',join(__dirname,'../schema/postgres/grant-monitor.sql'),
+        '-v','monitor_role='+monitorRole,'-v','workspace_id='+owner.workspaceId],psqlOptions);
+      const workerResult=()=>JSON.parse(execFileSync(process.execPath,[join(__dirname,'run-monitors.mjs')],{
+        encoding:'utf8',timeout:30_000,env:{...process.env,PROJECTOS_DATABASE_URL:monitorUrl.href,
+          PROJECTOS_MONITOR_WORKSPACE:owner.workspaceId,PROJECTOS_MONITOR_HOSTS:'127.0.0.1'},
+      }));
+      assert.equal(workerResult().tested,1);
+      assert.equal(workerResult().tested,1);
+      await monitor.connect();
+      assert.equal((await monitor.query('SELECT id FROM workspaces WHERE id=$1',[otherWorkspace])).rowCount,0);
+      assert.equal((await monitor.query("SELECT state FROM monitor_observations WHERE resource_id='probe-resource'")).rowCount,2);
+      assert.equal((await monitor.query("SELECT id FROM records WHERE kind='docs'")).rowCount,0);
+      await assert.rejects(monitor.query('SELECT id FROM users'),{code:'42501'});
+      await assert.rejects(monitor.query('UPDATE records SET record_version=1'),{code:'42501'});
+      await targetAdmin.query('DELETE FROM projectos_private.monitor_logins');
+      assert.equal((await monitor.query('SELECT id FROM workspaces')).rowCount,0);
+      assert.equal((await monitor.query('SELECT id FROM monitor_observations')).rowCount,0);
+    } finally {
+      await monitor.end();
+      await targetAdmin.end();
+    }
+    const reminderPassword=randomBytes(24).toString('hex');
+    await admin.query(`CREATE ROLE "${reminderRole}" LOGIN PASSWORD '${reminderPassword}'`);
+    reminderCreated=true;
+    execFileSync(psql,['-X','-h',url.hostname,'-p',url.port||'5432','-U',decodeURIComponent(url.username),
+      '-d',ledgerRestore,'-f',join(__dirname,'../schema/postgres/grant-reminder.sql'),
+      '-v','reminder_role='+reminderRole,'-v','workspace_id='+owner.workspaceId],psqlOptions);
+    const scopedAdmin=new Client({connectionString:connectionFor(ledgerRestore)});
+    try {
+      await scopedAdmin.connect();
+      await scopedAdmin.query(`UPDATE records SET payload=(payload::jsonb || '{"rotationDue":"2031-03-04"}')::text
+        WHERE kind='secrets' AND workspace_id=$1`,[owner.workspaceId]);
+    } finally { await scopedAdmin.end(); }
+    await closeDatabase();
+    const reminderUrl=new URL(connectionFor(ledgerRestore));
+    reminderUrl.username=reminderRole;
+    reminderUrl.password=reminderPassword;
+    process.env.PROJECTOS_DATABASE_URL=reminderUrl.href;
+    assert.equal(await sql.one('SELECT id FROM workspaces WHERE id=?',otherWorkspace),undefined);
+    assert.equal(await sql.one("SELECT id FROM records WHERE kind='secrets'"),undefined);
+    const rotation=await sql.one('SELECT payload FROM public.projectos_rotation_deadlines()');
+    assert.deepEqual(JSON.parse(rotation.payload),{projectId:'alpha',rotationDue:'2031-03-04'});
+    const reminderRun=await scan('2031-03-04T10:00:00Z');
+    assert.ok(reminderRun.generated>0);
+    await closeDatabase();
+    assert.equal((await scan('2031-03-04T10:00:00Z')).generated,0);
+    assert.equal(await sql.one("SELECT id FROM notification_outbox WHERE id='hidden-delivery'"),undefined);
+    await assert.rejects(sql.run("UPDATE notification_outbox SET delivered_at=now()"),{code:'42501'});
+    await assert.rejects(sql.all('SELECT id FROM users'),{code:'42501'});
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');
+    if (runtimeCreated) await admin.query('DROP ROLE "' + runtimeRole + '"');
+    if (deliveryCreated) await admin.query('DROP ROLE "' + deliveryRole + '"');
+    if (monitorCreated) await admin.query('DROP ROLE "' + monitorRole + '"');
+    if (reminderCreated) await admin.query('DROP ROLE "' + reminderRole + '"');
     await admin.end();
     rmSync(area, { recursive:true, force:true, maxRetries:5 });
   }
