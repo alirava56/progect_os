@@ -24,6 +24,8 @@ erDiagram
 
 An invoice belongs to one project and may contain up to 24 dated installments. Each posted payment points to an invoice in the same project and currency. The record service enforces payment totals and workspace-wide uniqueness of normalized invoice and payment references under the transaction's workspace lock. Issued invoices retain their original terms. Only invoices with zero recorded payments can be voided. Migration 005 adds the new record kinds to the PostgreSQL constraint while preserving existing rows.
 
+Migration 006 adds project-scoped exchange rate records. The immutable payload holds both currencies, a decimal string, a named source, and the source observation time. The finance page keeps decimal conversion separate from ledger writes.
+
 `record_version` is the revision at the last write. `record_tombstones` retains delete revisions. Combined with the workspace watermark it supports optimistic conflicts without losing independent edits. `sqlite_imports` records a source digest, table counts and import time. Authentication rate limits and worker heartbeats have dedicated tables.
 
 The SQL migrations show physical SQL constraints. Arrows above include logical relationships enforced by the repository, such as the link between delivery and retry lease. Secrets stored for authentication are encrypted TOTP provisioning state and one-way hashes. Vault record payloads contain locators and approved link metadata. [Runtime ADR](ADR-002-postgres-runtime.md)

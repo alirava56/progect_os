@@ -1,4 +1,5 @@
 import type { CurrencyUnit } from './types';
+import { normalized } from './format';
 
 export const currencies: readonly CurrencyUnit[] = ['TOMAN','IRR','USD'];
 const labels = { TOMAN:'تومان', IRR:'ریال', USD:'دلار' };
@@ -8,7 +9,7 @@ const zero = BigInt(0), hundred = BigInt(100);
 export type Money = {amount:number;currency?:CurrencyUnit;amountUnit?:'minor'};
 
 export function parseAmount(entry: string, currency: CurrencyUnit) {
-  const match = /^(\d{1,13})(?:\.(\d{1,2}))?$/.exec(entry);
+  const match = /^(\d{1,13})(?:\.(\d{1,2}))?$/.exec(normalized(entry).replace('٫','.'));
   if (!match || (match[2] && currency !== 'USD')) return;
   const amount = currency === 'USD'
     ? BigInt(match[1]) * hundred + BigInt((match[2] ?? '').padEnd(2,'0'))

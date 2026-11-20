@@ -323,6 +323,31 @@ test('finance records installments and payments, preserves voided invoices, and 
   } finally { await member.dispose(); }
 });
 
+test('a dated exchange rate stays attributed and converts precise values without changing the ledger',async({page,origin})=>{
+  await bootstrap(page.request,origin);
+  expect((await page.request.patch('/api/records',{headers:origin,data:{version:0,changes:[
+    create('projects',project('fx-project')),
+  ]}})).status()).toBe(200);
+  await page.goto('/finance');
+  await page.getByRole('button',{name:'ثبت نرخ تبدیل',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'ثبت نرخ تبدیل'});
+  await dialog.getByLabel('پروژه',{exact:true}).selectOption('fx-project');
+  await dialog.getByLabel('نرخ برای یک واحد ارز مبدأ').fill('۱۲۳٫۵');
+  await dialog.getByLabel('زمان مشاهده (میلادی، UTC)').fill('2026-01-15T14:30');
+  await dialog.getByLabel('نام منبع و شناسهٔ مرجع').fill('گزارش آزمایشی نرخ ۷');
+  await dialog.getByRole('button',{name:'ذخیرهٔ نرخ'}).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByLabel('مبلغ برای تبدیل (USD)').fill('۱٫۰۱');
+  await expect(page.getByText('برآورد با نرخ انتخاب‌شده · ۱۲۵ تومان')).toBeVisible();
+  await expect(page.locator('time[datetime="2026-01-15T14:30:00.000Z"]')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('گزارش آزمایشی نرخ ۷',{exact:true})).toBeVisible();
+  const snapshot=(await (await page.request.get('/api/state')).json()).data;
+  expect(snapshot.exchangeRates).toEqual([expect.objectContaining({rate:'123.5',from:'USD',to:'TOMAN'})]);
+  expect(snapshot.expenses).toEqual([]);
+  expect(snapshot.payments).toEqual([]);
+});
+
 test('only an empty archived project can be deleted from its page', async ({page, origin}) => {
   await bootstrap(page.request, origin);
   const shared = {id:'shared-vps', name:'Shared VPS', projectId:'hosting', linkedProjectIds:['protected'],

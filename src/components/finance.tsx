@@ -7,6 +7,7 @@ import { csv, dateLabel, download, matches, newId, percent, resourceHref, today 
 import { useDemo } from '@/lib/store';
 import type { Expense, RecurringCharge, ContractRecord, RevenueEntry, CurrencyUnit } from '@/lib/types';
 import { Bars, Donut, Trend } from './charts';
+import { ExchangeRates } from './exchange-rates';
 import { InvoiceLedger } from './invoice-ledger';
 import { ProjectField, ProjectFilter, SelectOptions, projectName } from './forms';
 import { Button, Callout, Empty, Field, Filter, FormActions, Heading, Metrics, Modal, Panel, Pill, Progress, Row, SearchField, SectionBar, Table, TextLink, formValues } from './ui';
@@ -85,8 +86,8 @@ export function Finance() {
       <Field label="ارز نمودارها"><select value={chartCurrency} onChange={e=>setChartCurrency(e.target.value as CurrencyUnit)}>
         <option value="TOMAN">تومان</option><option value="IRR">ریال</option><option value="USD">دلار</option>
       </select></Field>
-      <Field label="از تاریخ (میلادی)"><input type="date" value={from} onChange={e => setFrom(e.target.value)} dir="ltr" /></Field>
-      <Field label="تا تاریخ (میلادی)"><input type="date" value={to} onChange={e => setTo(e.target.value)} dir="ltr" /></Field>
+      <Field label="از تاریخ (میلادی)"><input type="date" value={from} onInput={e => setFrom(e.currentTarget.value)} dir="ltr" /></Field>
+      <Field label="تا تاریخ (میلادی)"><input type="date" value={to} onInput={e => setTo(e.currentTarget.value)} dir="ltr" /></Field>
     </div>
     {invalidRange ? <Panel><p className="form-error" role="alert">تاریخ پایان باید برابر یا پس از تاریخ شروع باشد.</p></Panel> : <div className="stack">
       <div className="split">
@@ -121,6 +122,7 @@ export function Finance() {
         ]}/>:<Empty title="درآمدی ثبت نشده است" />}
       </Panel>
       <InvoiceLedger projectId={projectScope}/>
+      <ExchangeRates projectId={projectScope}/>
       <Panel title="فهرست پرداخت‌ها و تمدیدها"><Table label="پرداخت‌های" rows={items} columns={[
         {label:'شرح',render:e => <button className="cell-link" type="button" onClick={() => setEdit(e)}>{e.title}</button>},
         {label:'پروژه',render:e => <bdi>{projectName(data,e.projectId)}</bdi>},

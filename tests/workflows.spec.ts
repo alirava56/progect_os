@@ -19,7 +19,9 @@ test.beforeEach(async ({page,origin})=>{
 test('global search, keyboard dialog, no-results, and nested navigation', async ({ page }) => {
   await page.goto('/dashboard');
   const trigger = page.getByRole('button', {name:'جست‌وجوی فضای کاری'});
+  await expect(trigger).toBeEnabled();
   await trigger.focus();
+  await expect(trigger).toBeFocused();
   await page.keyboard.press('Control+k');
   const dialog = page.getByRole('dialog');
   const search = dialog.getByRole('searchbox');
@@ -230,8 +232,11 @@ test('expense create, filter by category and dates, report download', async ({ p
   await dialog.getByLabel('مبلغ',{exact:true}).fill('125000');
   await dialog.getByLabel('تاریخ (میلادی)').fill('2026-01-15');
   await dialog.getByRole('button',{name:'ذخیره هزینه'}).click();
+  await expect(dialog).toHaveCount(0);
   await page.getByLabel('دسته‌بندی هزینه').selectOption({label:'اشتراک'});
-  await page.getByLabel('از تاریخ (میلادی)').fill('2026-01-01');
+  const from=page.getByLabel('از تاریخ (میلادی)');
+  await from.fill('2026-01-01');
+  await expect(from).toHaveValue('2026-01-01');
   await expect(page.getByRole('table').getByText('اشتراک نمونه تیم')).toBeVisible();
   await expect(page.getByRole('table').getByText('سرویس استقرار')).toHaveCount(0);
   await expect(page.getByRole('table').getByText('۱۲۵٬۰۰۰ تومان')).toBeVisible();

@@ -221,6 +221,15 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     await assert.rejects(commitRecordChanges(owner,voidedVersion,[{kind:'invoices',id:unpaid.id,action:'replace',
       record:unpaid}]),/only be voided/);
     assert.equal((await loadState(owner)).data.invoices.find(row=>row.id===unpaid.id).state,'void');
+    const quote={id:'fixture-rate',projectId:'beta',from:'USD',to:'IRR',rate:'8421.25',
+      source:'Synthetic fixture statement',observedAt:'2026-01-15T00:00:00.000Z'};
+    const ratesVersion=await commitRecordChanges(owner,voidedVersion,[create('exchangeRates',quote)]);
+    const limited=await accountByUser(editorId);
+    assert.deepEqual((await loadState(limited)).data.exchangeRates,[]);
+    await assert.rejects(commitRecordChanges(limited,ratesVersion,[create('exchangeRates',{
+      ...quote,id:'blocked-rate',projectId:'alpha',
+    })]),/permission/);
+    await assert.rejects(commitRecordChanges(owner,ratesVersion,[{kind:'exchangeRates',id:quote.id,action:'delete'}]),/immutable/);
     const ledgerRestore='projectos_restore_ledger_'+suffix;
     await admin.query('CREATE DATABASE "'+ledgerRestore+'"');
     created.push(ledgerRestore);
@@ -234,6 +243,7 @@ test('SQLite to PostgreSQL preserves data and identity; transactional rollback, 
     const restoredLedger=(await loadState(owner)).data;
     assert.deepEqual(restoredLedger.payments,[saved]);
     assert.equal(restoredLedger.invoices.find(row=>row.id===unpaid.id).state,'void');
+    assert.deepEqual(restoredLedger.exchangeRates,[quote]);
   } finally {
     await closeDatabase();
     for (const db of created.reverse()) await admin.query('DROP DATABASE "' + db + '"');

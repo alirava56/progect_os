@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, Bell, CalendarDays, ChartNoAxesCombined, ChevronDown, ChevronLeft, Clock3, FileText,
   FolderKanban, Layers2, LayoutDashboard, ListTodo, LogOut, Menu, Plus, Plug2, ReceiptText, Search,
   Server, Settings, ShieldCheck, Sparkles, Users, PanelTopOpen,
 } from 'lucide-react';
-import { useDemo } from '@/lib/store';
+import { useDemo, useWorkspaceReady } from '@/lib/store';
 import { docHref, matches, number, projectHref, serverHref, taskHref } from '@/lib/format';
 import { incidentStates } from '@/lib/labels';
 import { Art, Empty, Glyph, IconButton, Modal, Row, SearchField, TextLink } from './ui';
@@ -43,9 +43,6 @@ const groups = [
 const links = groups.flatMap(group => group.links);
 type Overlay = 'search' | 'nav' | 'account' | 'notifications' | 'quick' | 'projects' | 'project' | 'task' | 'resource' | 'reminder';
 const isActive = (path: string, current: string) => current === path || current.startsWith(path + '/');
-const subscribeToHydration = () => () => {};
-const clientReady = () => true;
-const serverReady = () => false;
 export function Mark({ className = '' }: { className?: string }) {
   return <span className={`brand-mark ${className}`} aria-hidden="true"><Layers2 /></span>;
 }
@@ -66,7 +63,7 @@ function Navigation({ current, onNavigate }: { current: string; onNavigate?: () 
     </Link>)}
   </div>)}</nav>;
 }
-function GlobalSearch({ close }: { close: () => void }) {
+function GlobalSearch({ close, returnFocus }: { close: () => void; returnFocus: HTMLElement | null }) {
   const { data } = useDemo();
   const [query, setQuery] = useState('');
   const results = [
@@ -75,8 +72,8 @@ function GlobalSearch({ close }: { close: () => void }) {
     ...data.resources.filter(r => r.type === 'server').map(x => ({ title:x.name, detail:'سرور', match:x.address, href:serverHref(x.id), Icon:Server })),
     ...data.docs.map(x => ({ title:x.title, detail:'مستند', match:x.body, href:docHref(x.id), Icon:FileText })),
   ].filter(x => matches(query, x.title, x.detail, x.match)).slice(0, 9);
-  return <Modal title="جست‌وجوی فضای کاری" onClose={close}>
-    <SearchField label="جست‌وجوی پروژه، وظیفه، سرور یا سند" value={query} onChange={setQuery} autoFocus />
+  return <Modal title="جست‌وجوی فضای کاری" onClose={close} returnFocus={returnFocus}>
+    <SearchField label="جست‌وجوی پروژه، وظیفه، سرور یا سند" value={query} onChange={setQuery} />
     <div className="search-results">{results.length === 0 && <Empty title="نتیجه‌ای پیدا نشد" detail="نام یا شناسهٔ دیگری را امتحان کنید." />}
       {results.map(({ title, detail, href, Icon }) => <Link className="item-row item-interactive" key={href} href={href} onClick={close}>
         <Glyph icon={Icon} /><span className="row-copy"><strong dir="auto">{title}</strong><small>{detail}</small></span><ChevronLeft size={16} aria-hidden="true" />
@@ -87,7 +84,9 @@ function GlobalSearch({ close }: { close: () => void }) {
 export function Shell({ children }: { children: ReactNode }) {
   const current = usePathname();
   const [overlay, setOverlay] = useState<Overlay | null>(null);
-  const interactive = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
+  const interactive = useWorkspaceReady();
+  const [searchOrigin,setSearchOrigin]=useState<HTMLElement|null>(null);
+  const searchButton=useRef<HTMLButtonElement>(null);
   const { data, projectScope, setProjectScope, saving, syncError, notice } = useDemo();
   const parent = links.find(link => isActive(link.path, current));
   const project = data.projects.find(p => p.id === projectScope);
@@ -97,15 +96,18 @@ export function Shell({ children }: { children: ReactNode }) {
   const close = () => setOverlay(null);
 
   useEffect(() => {
+    if (overlay!==null) return;
     function keydown(event: KeyboardEvent) {
       if (event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        setOverlay(previous => previous === null ? 'search' : previous);
+        const active=document.activeElement;
+        setSearchOrigin(active instanceof HTMLElement && active!==document.body ? active : searchButton.current);
+        setOverlay('search');
       }
     }
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, []);
+  }, [overlay]);
 
   return <div className="app-shell">
     <a href="#page-content" className="skip-link">رفتن به محتوای صفحه</a>
@@ -126,7 +128,9 @@ export function Shell({ children }: { children: ReactNode }) {
           </nav>
         </div>
         <div className="top-tools">
-          <button className="top-search" type="button" disabled={!interactive} onClick={() => setOverlay('search')} title="جست‌وجوی فضای کاری">
+          <button ref={searchButton} className="top-search" type="button" disabled={!interactive} onClick={event=>{
+            setSearchOrigin(event.currentTarget);setOverlay('search');
+          }} title="جست‌وجوی فضای کاری">
             <Search size={16} aria-hidden="true" /><span>جست‌وجوی فضای کاری</span><kbd dir="ltr" aria-hidden="true">Ctrl K</kbd>
           </button>
           <IconButton icon={Plus} label="افزودن سریع" disabled={!interactive} onClick={() => setOverlay('quick')} />
@@ -141,7 +145,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <nav className="mobile-nav" aria-label="دسترسی سریع">{links.filter(link => link.short).map(({ path, Icon, short }) => <Link key={path} className={isActive(path, current) ? 'is-active' : ''} aria-current={isActive(path,current) ? 'page' : undefined} href={path} prefetch={false}><Icon aria-hidden="true" /><span>{short}</span></Link>)}</nav>
 
     {overlay === 'nav' && <Modal title="فضای کاری" onClose={close} align="drawer"><Navigation current={current} onNavigate={close} /><div className="modal-footer"><button type="button" className="button button-soft" onClick={() => setOverlay('projects')}>جابه‌جایی بین پروژه‌ها</button></div></Modal>}
-    {overlay === 'search' && <GlobalSearch close={close} />}
+    {overlay === 'search' && <GlobalSearch close={close} returnFocus={searchOrigin} />}
     {overlay === 'quick' && <Modal title="افزودن سریع" onClose={close}>
       <Row title="پروژه جدید" icon={FolderKanban} onClick={() => setOverlay('project')} />
       <Row title="وظیفه جدید" icon={ListTodo} onClick={() => setOverlay('task')} />

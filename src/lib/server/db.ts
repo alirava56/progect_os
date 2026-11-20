@@ -136,6 +136,7 @@ const eventSources: Record<string, string> = {
   reminders: 'تقویم', incidents: 'هشدارها', secrets: 'خزانه', expenses: 'مالی',
   charges: 'اشتراک‌ها', contracts: 'قراردادها', revenues: 'درآمد',
   invoices: 'فاکتورها', payments: 'پرداخت‌ها',
+  exchangeRates: 'نرخ تبدیل ارز',
   manual: 'ثبت دستی',
 };
 type EventRow = Pick<ActivityEvent, 'id' | 'title' | 'projectId' | 'date'> & {
@@ -305,6 +306,11 @@ export async function persistChanges(
     const before = previous ? JSON.parse(previous.payload) as WorkspaceRecord : undefined;
     const projectId = record ? projectOf(kind, record) : previous?.project_id ?? null;
     if (kind==='payments' && previous) throw new ValidationError('Posted payments are immutable');
+    if (kind==='exchangeRates' && previous) throw new ValidationError('Recorded exchange rates are immutable');
+    if (kind==='projects' && !record && await db.one(`SELECT id FROM records WHERE workspace_id=?
+      AND project_id=? AND kind='exchangeRates' LIMIT 1`,workspaceId,id)) {
+      throw new ValidationError('Project still has exchange rates');
+    }
     if (kind==='invoices') {
       const invoice=record as Invoice | undefined;
       const original=before as Invoice | undefined;

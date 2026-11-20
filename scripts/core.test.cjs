@@ -844,6 +844,23 @@ test('invoice installments use exact remaining balances and legacy snapshots pre
   await assert.rejects(saveState(owner,after.version,parseState(legacy)),/Invoice project must exist/);
 });
 
+test('exchange conversion preserves minor units and rejects rates without valid attribution',()=>{
+  const {convertAtRate}=require('../src/lib/exchange-rate.ts');
+  const {parseRecord}=require('../src/lib/server/validation.ts');
+  const quote={id:'synthetic-quote',projectId:'a',from:'USD',to:'TOMAN',rate:'۱۲۳٫۵',source:' Fixture statement 7 ',
+    observedAt:'2026-01-15T14:30Z'};
+  const valid=parseRecord('exchangeRates',quote);
+  assert.equal(valid.source,'Fixture statement 7');
+  assert.equal(valid.observedAt,'2026-01-15T14:30:00.000Z');
+  assert.equal(convertAtRate(101n,valid),125n);
+  assert.equal(convertAtRate(-100n,{...valid,rate:'123.5'}),-124n);
+  assert.equal(convertAtRate(100n,{from:'IRR',to:'USD',rate:'0.00005'}),1n);
+  for (const override of [{rate:'0'},{rate:'1e5'},{to:'USD'},{to:'JPY'},{source:'  '},{observedAt:'2026-01-15'},
+    {observedAt:'2199-01-15T14:30Z'}]) {
+    assert.throws(()=>parseRecord('exchangeRates',{...quote,...override}),/Invalid enum|Exchange rates require/);
+  }
+});
+
 test('model citations accept literal permitted text and reject unsupported or wrong-source output',()=>{
   const {verifyQuotes}=require('../src/lib/server/project-memory.ts');
   const sources=[{id:'doc:test',excerpt:'Synthetic support sentence.'}];

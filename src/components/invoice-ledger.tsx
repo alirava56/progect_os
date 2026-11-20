@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { Download, Plus } from 'lucide-react';
-import { csv, dateLabel, download, newId, normalized, today } from '@/lib/format';
+import { csv, dateLabel, download, newId, today } from '@/lib/format';
 import { installmentBalances, invoiceBalance } from '@/lib/invoice-ledger';
 import { amountLabel, formatMoney, inputAmount, parseAmount } from '@/lib/money';
 import { useDemo } from '@/lib/store';
@@ -20,11 +20,11 @@ function InvoiceForm({projectId,onClose}:{projectId:string;onClose:()=>void}) {
   async function submit(event:FormEvent<HTMLFormElement>) {
     const get=formValues(event);
     const currency=get('currency') as CurrencyUnit;
-    const amount=parseAmount(normalized(get('amount')).replace('٫','.'),currency);
+    const amount=parseAmount(get('amount'),currency);
     if (!amount) {setError('مبلغ فاکتور باید مثبت و متناسب با ارز انتخاب‌شده باشد.');return;}
     const installments:InvoiceInstallment[]=[];
     for(let index=0;index<count;index++){
-      const installment=parseAmount(normalized(get('installment-amount-'+index)).replace('٫','.'),currency);
+      const installment=parseAmount(get('installment-amount-'+index),currency);
       if (!installment) {setError('مبلغ هر قسط باید مثبت و متناسب با ارز فاکتور باشد.');return;}
       installments.push({dueOn:get('installment-date-'+index),amount:installment});
     }
@@ -70,7 +70,7 @@ function PaymentForm({invoice,remaining,onClose}:{invoice:Invoice;remaining:bigi
   const [error,setError]=useState('');
   async function submit(event:FormEvent<HTMLFormElement>) {
     const get=formValues(event);
-    const amount=parseAmount(normalized(get('amount')).replace('٫','.'),invoice.currency);
+    const amount=parseAmount(get('amount'),invoice.currency);
     if (!amount || BigInt(amount)>remaining) {setError('مبلغ پرداخت باید مثبت و حداکثر برابر مانده باشد.');return;}
     const record:Payment={id:newId('payment'),projectId:invoice.projectId,invoiceId:invoice.id,reference:get('reference'),
       currency:invoice.currency,amountUnit:'minor',amount,paidOn:get('paidOn')};

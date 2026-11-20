@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Download, KeyRound, Mail, Pencil, Plug2, Plus, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { download } from '@/lib/format';
-import { savePreferences, useDemo } from '@/lib/store';
+import { savePreferences, useDemo, useWorkspaceReady } from '@/lib/store';
 import type { Integration, Preferences } from '@/lib/types';
 import { Art, Button, Callout, Field, Heading, Metrics, Modal, Panel, Pill, Row, Switch, Table } from './ui';
 
@@ -68,6 +68,7 @@ export function Integrations() {
 
 export function Team() {
   const {data}=useDemo();
+  const ready=useWorkspaceReady();
   const owner=data.users[0]?.role==='Owner';
   const [email,setEmail]=useState(''),[role,setRole]=useState<'viewer'|'editor'>('viewer');
   const [limited,setLimited]=useState(true);
@@ -118,7 +119,7 @@ export function Team() {
         {label:'کنترل',render:u=>owner&&u.role!=='Owner'?<Button disabled={busy} onClick={()=>remove(u.id)}>لغو عضویت</Button>:<Pill tone="good">فعال</Pill>},
       ]}/></Panel>
       {owner&&<Panel title="دعوت به تیم">
-        <form className="form-stack" onSubmit={invite}>
+        <form onSubmit={invite}><fieldset className="form-stack" disabled={!ready||busy}>
           <Field label="ایمیل عضو جدید"><input type="email" dir="ltr" required value={email} onChange={e=>setEmail(e.target.value)} /></Field>
           <Field label="سطح دسترسی"><select value={role} onChange={e=>setRole(e.target.value as 'viewer'|'editor')}><option value="viewer">Viewer · مشاهده</option><option value="editor">Developer · ویرایش کارها و اسناد</option></select></Field>
           <Field label="دامنهٔ پروژه‌ها"><select value={limited?'limited':'workspace'} onChange={e=>setLimited(e.target.value==='limited')}>
@@ -129,7 +130,7 @@ export function Team() {
             {data.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select></Field>}
           <Button disabled={busy||!email||(limited&&!projectIds.length)} type="submit" icon={Plus}>ایجاد کد دعوت یک‌بارمصرف</Button>
-        </form>
+        </fieldset></form>
         {token&&<div className="form-stack"><Callout>کد زیر تنها همین یک بار نمایش داده می‌شود. گیرنده باید آدرس /join را باز و کد را در فرم وارد کند. آن را در مستندات ProjectOS ذخیره نکن.</Callout><p dir="ltr" className="font-mono break-all select-text">{token}</p><Button onClick={()=>setToken('')}>کد را ذخیره کردم؛ پنهان کن</Button></div>}
         {invites.filter(i=>i.active).map(i=><Row key={i.id} icon={Mail} title={<bdi dir="ltr">{i.email}</bdi>} meta={`نقش: ${i.role} · انقضا: ${new Date(i.expiresAt).toLocaleString('fa-IR')}`} end={<Button disabled={busy} onClick={()=>revoke(i.id)}>ابطال</Button>}/>)}
       </Panel>}

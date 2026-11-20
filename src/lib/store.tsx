@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { emptyData } from './empty-data';
 import { recordKinds, type RecordChange } from './record-contract';
 import type { ActivityEvent, DemoData, Preferences } from './types';
@@ -15,6 +15,12 @@ interface Store {
   syncError: string | null;
 }
 const DemoContext = createContext<Store | null>(null);
+const subscribeToHydration=()=>()=>{};
+const clientReady=()=>true;
+const serverReady=()=>false;
+export function useWorkspaceReady() {
+  return useSyncExternalStore(subscribeToHydration,clientReady,serverReady);
+}
 
 function changesBetween(previous: DemoData, next: DemoData) {
   const changes: RecordChange[] = [];

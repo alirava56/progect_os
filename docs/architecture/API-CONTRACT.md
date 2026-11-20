@@ -31,6 +31,8 @@ Resources, tasks and reminders accept optional `noticeDays` values from 0 throug
 
 The record APIs expose `invoices` and `payments` to project-authorized readers. Writes require Owner. Invoices begin open and store their direction, dates, and optional installment amounts. Payments require the same project and currency as the invoice, a date on or after issue, and a distinct payment reference. A batch that exceeds the invoice amount is rejected. The only supported change after invoice issue is voiding an unpaid invoice. Posted payments are immutable. Each amount is a positive integer marked with `amountUnit: "minor"`. USD uses cents, IRR uses rials, and TOMAN uses whole tomans. Reports keep currencies separate and allocate payments to the earliest installment first. Older local snapshots that omit the two collections preserve the records already stored.
 
+`exchangeRates` holds operator-recorded quotes for project-authorized readers. Only Owners can create them. Each immutable quote carries a source reference, observed UTC timestamp, distinct source and target currencies, and a positive decimal rate stored as text. The rate expresses whole destination currency per whole source currency. Conversion uses integer arithmetic and rounds to the destination minor unit, with ties rounded away from zero. The conversion does not create a payment or change any recorded balance. Older snapshots may omit this collection and preserve all quotes.
+
 Example request with the latest usable Workspace watermark.
 
 ```json

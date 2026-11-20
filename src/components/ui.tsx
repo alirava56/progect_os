@@ -92,12 +92,14 @@ export function Table<T extends { id: string }>({ columns, rows, label, compact 
   </tr></thead><tbody>{rows.map(row => <tr key={row.id}>{columns.map(column => <td key={column.label} className={column.extra ? 'table-extra' : undefined}>{column.render(row)}</td>)}</tr>)}</tbody></table></div></>;
 }
 
-export function Modal({ title, onClose, children, align = 'center' }: { title: string; onClose: () => void; children: ReactNode; align?: 'center' | 'drawer' }) {
+export function Modal({ title, onClose, children, align = 'center',returnFocus }: {
+  title:string; onClose:()=>void; children:ReactNode; align?:'center'|'drawer'; returnFocus?:HTMLElement|null;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
     const dialog = ref.current;
-    const originalFocus = document.activeElement;
+    const originalFocus = returnFocus ?? document.activeElement;
     dialog?.showModal();
     dialog?.querySelector<HTMLElement>('input:not([type=checkbox]):not([disabled]), textarea:not([disabled])')?.focus();
     const previous = document.body.style.overflow;
@@ -107,7 +109,7 @@ export function Modal({ title, onClose, children, align = 'center' }: { title: s
       document.body.style.overflow = previous;
       if (originalFocus instanceof HTMLElement && originalFocus.isConnected) originalFocus.focus();
     };
-  }, []);
+  }, [returnFocus]);
   return <dialog ref={ref} aria-labelledby={titleId} className={`modal modal-${align}`}
     onKeyDown={event => {
       if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;

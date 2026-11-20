@@ -1,6 +1,7 @@
 import { validRecordId } from '../record-contract';
 import type { DemoData } from '../types';
 import { emptyData } from '../empty-data';
+import { parseRate } from '../exchange-rate';
 import { suspiciousInRecord } from './credential-guard';
 import {vaultLink} from '../vault-link';
 
@@ -8,6 +9,7 @@ type Rule = {type:'string'|'number'|'boolean'|'strings'|'checklist'|'comments'|'
 const s=(max=200,optional=false,values?:readonly string[]):Rule=>({type:'string',max,optional,values});
 const n=(max=1e12,optional=false):Rule=>({type:'number',max,optional});
 const str=(max=30):Rule=>({type:'strings',max});
+const currencies=['TOMAN','IRR','USD'] as const;
 const ruleSets={
   projects:{id:s(100),name:s(100),subtitle:s(150),coverTitle:s(150),description:s(4000),status:s(30,false,['building','review','active','archived']),archivedFrom:s(30,true,['building','review','active']),type:s(70),progress:n(100),next:s(400),art:s(100)},
   tasks:{id:s(100),title:s(200),projectId:s(100),status:s(20,false,['todo','doing','blocked','review','done']),priority:s(20,false,['low','medium','high']),owner:s(100),due:s(32),noticeDays:n(60,true),description:s(10000),checklist:{type:'checklist',max:200},comments:{type:'comments',max:500},dependencies:str(80)},
@@ -27,9 +29,11 @@ const ruleSets={
     state:s(12,false,['open','void']),installments:{type:'installments',max:24,optional:true}},
   payments:{id:s(100),projectId:s(100),invoiceId:s(100),reference:s(100),amount:n(1e12),
     currency:s(10,false,['TOMAN','IRR','USD']),amountUnit:s(10,false,['minor']),paidOn:s(10)},
+  exchangeRates:{id:s(100),projectId:s(100),from:s(10,false,currencies),to:s(10,false,currencies),
+    rate:s(32),source:s(160),observedAt:s(24)},
 } as const;
 type Collection=keyof typeof ruleSets;
-type LedgerCollection='invoices'|'payments';
+type LedgerCollection='invoices'|'payments'|'exchangeRates';
 export type CanonicalState=Pick<DemoData,Exclude<Collection,LedgerCollection>|'preferences'> & Partial<Pick<DemoData,LedgerCollection>>;
 export class ValidationError extends Error {constructor(public reason:string){super(reason);}}
 function bad(message:string):never { throw new ValidationError(message); }
@@ -114,6 +118,19 @@ export function parseRecord<Kind extends Collection>(kind: Kind, item: unknown):
       if (!validRecordId(clean.invoiceId)) bad('Invalid invoice reference');
       checkDate(clean.paidOn);
       break;
+    case 'exchangeRates': {
+      const rate=parseRate(clean.rate as string);
+      const source=(clean.source as string).trim();
+      const observedAt=clean.observedAt as string;
+      checkDate(observedAt);
+      if (clean.from===clean.to || !rate || !source || !observedAt.includes('T') || Date.parse(observedAt)>Date.now()) {
+        bad('Exchange rates require distinct currencies, a positive decimal, a named source and an observed UTC time');
+      }
+      clean.rate=rate.text;
+      clean.source=source;
+      clean.observedAt=new Date(observedAt).toISOString();
+      break;
+    }
     case 'invoices': {
       checkDate(clean.issuedOn);
       checkDate(clean.dueOn);
@@ -251,11 +268,12 @@ export function parseState(value:unknown):CanonicalState {
     docs:parseCollection(value.docs,'docs',5000),
     ...(value.invoices===undefined ? {} : {invoices:parseCollection(value.invoices,'invoices',10000)}),
     ...(value.payments===undefined ? {} : {payments:parseCollection(value.payments,'payments',20000)}),
+    ...(value.exchangeRates===undefined ? {} : {exchangeRates:parseCollection(value.exchangeRates,'exchangeRates',10000)}),
     preferences:parsePreferences(value.preferences),
   } as unknown as CanonicalState;
   const projects = new Set(state.projects.map(project => project.id));
   const resources = new Set(state.resources.map(resource => resource.id));
-  for (const kind of ['tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs','invoices','payments'] as const)
+  for (const kind of ['tasks','resources','secrets','reminders','incidents','expenses','charges','contracts','revenues','docs','invoices','payments','exchangeRates'] as const)
     for (const record of state[kind] ?? []) if (!projects.has(record.projectId)) bad('Unknown project in ' + kind);
   for (const resource of state.resources)
     if (resource.linkedProjectIds?.some(id => !projects.has(id))) bad('Invalid shared resource project');

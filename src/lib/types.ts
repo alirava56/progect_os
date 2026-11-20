@@ -105,6 +105,10 @@ export interface RevenueEntry {
   date:string;status:'received'|'outstanding';
 }
 export interface InvoiceInstallment { dueOn:string; amount:number }
+export interface ExchangeRate {
+  id:string; projectId:string; from:CurrencyUnit; to:CurrencyUnit; rate:string;
+  source:string; observedAt:string;
+}
 export interface Invoice {
   id:string; projectId:string; reference:string; title:string; direction:'receivable'|'payable';
   amount:number; currency:CurrencyUnit; amountUnit:'minor'; issuedOn:string; dueOn:string;
@@ -142,6 +146,7 @@ export interface DemoData {
   revenues: RevenueEntry[];
   invoices: Invoice[];
   payments: Payment[];
+  exchangeRates: ExchangeRate[];
   docs: Doc[];
   events: ActivityEvent[];
   integrations: Integration[];
